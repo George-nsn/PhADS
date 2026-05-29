@@ -1,0 +1,315 @@
+ADS_name	Against/Function
+abc1	RecBCD
+abc2	RecBCD
+aca1	CRISPR-Cas - Type I-E, I-F
+aca10	CRISPR-Cas - Type I-C, I-E
+aca11	CRISPR-Cas - Type II-A
+aca12	CRISPR-Cas - Type II-A
+aca13	CRISPR-Cas - Type II-A
+aca2	CRISPR-Cas - Type I-F, II-C
+aca3	CRISPR-Cas - Type II-C
+aca4	CRISPR-Cas - Type I-F
+aca5	CRISPR-Cas - Type I-F
+aca6	CRISPR-Cas - Type I-F
+aca7	CRISPR-Cas - Type I-F
+aca8	CRISPR-Cas - Type I-D
+aca9	CRISPR-Cas - Type I-F, I-E
+acb1	CBASS
+acb2	CBASS
+AcrVIA1_Lse	CRISPR-Cas - Type VI-A
+acrx	CRISPR
+adfa	DarTG
+adnd_p0020	Dnd
+adnd_p0021	Dnd
+alt	TA - MazEF
+apyc1	Pycsar
+arda	RM
+ardb	RM; CRISPR-Cas Type I-C
+ardc	RM
+ardk	RM
+ardr	RM
+ardu	RM
+arn	RM
+atd1	TIR/STING
+dam	RM - Type II; DNA adenine methylase
+dara	RM - Type I
+darb	RM - Type I
+ddra	RM
+ddrb	RM
+dmd	TA
+dsad1	DSR2
+gad1	Gabjia
+gad2	Gabija
+gam	RecBCD
+gnarl1	O-antigen-based barrier
+gnarl2	O-antigen-based barrier
+gnarl3	O-antigen-based barrier
+gp4_5	TA - sanaTA
+gp5_9	RecBCD
+had1	Hachiman
+hdf	RM
+hia5	RM
+hin1523	RM
+ipi	RM
+ipii	RM
+klca	RM
+lar	RM
+mom	RM
+narp1_adps	NADP
+narp1_namat	NADP
+narp2_nampt	NADP
+narp2_nmnat	NADP
+nma1821	RM
+ntase	CBASS/CRISPR-III
+ocr	RM - Type I EcoKI; BREX
+orba	BREX
+orf126	Broad-spectrum
+orf148	Broad-spectrum
+psib	SOS stress response
+psia	SOS stress response
+racc	Retron-Sen2
+rad	Retron
+ral	RM - Type I
+rexb	TA - Phd-Doc; TA - MazEF
+samase	RM; BREX
+stp	RM
+tad1	Thoeris; CBASS
+tad2	Thoeris; CBASS
+tifa	TA
+ugi	DNA repair
+ulx	RM
+vcrx089	RM
+vcrx090	RM
+vcrx091	CRISPR-Cas; DNA repair
+vcrx092	CRISPR-Cas; DNA repair
+vcrx093	CRISPR-Cas; DNA repair
+AcrIA	CRISPR-Cas - Type I-A
+AcrIA1	CRISPR-Cas - Type I-A
+AcrIA3	CRISPR-Cas - Type I-A
+AcrIB1	CRISPR-Cas - Type I-B
+AcrIB2	CRISPR-Cas - Type I-B
+AcrIB3	CRISPR-Cas - Type I-B
+AcrIB4	CRISPR-Cas - Type I-B
+AcrIB5	CRISPR-Cas - Type I-B
+AcrIB6	CRISPR-Cas - Type I-B
+AcrIB7	CRISPR-Cas - Type I-B
+AcrIB8	CRISPR-Cas - Type I-B
+AcrIB9	CRISPR-Cas - Type I-B
+AcrIC1	CRISPR-Cas - Type I-C
+AcrIF2_IC2	CRISPR-Cas - Type I-C, I-F
+AcrIC3	CRISPR-Cas - Type I-C
+AcrIC4	CRISPR-Cas - Type I-C
+AcrIC5	CRISPR-Cas - Type I-C
+AcrIC6	CRISPR-Cas - Type I-C, I-E
+AcrIC7	CRISPR-Cas - Type I-C, I-E
+AcrIC8	CRISPR-Cas - Type I-C, I-E
+AcrIC9	CRISPR-Cas - Type I-C
+AcrIC10	CRISPR-Cas - Type I-C
+AcrIC11	CRISPR-Cas - Type I-C
+AcrID1	CRISPR-Cas - Type I-D
+AcrIE1	CRISPR-Cas - Type I-E
+AcrIE2	CRISPR-Cas - Type I-E
+AcrIE3	CRISPR-Cas - Type I-E
+AcrIE4	CRISPR-Cas - Type I-E
+AcrIE5	CRISPR-Cas - Type I-E
+AcrIE6	CRISPR-Cas - Type I-E
+AcrIE7	CRISPR-Cas - Type I-E
+AcrIE4_IF7	CRISPR-Cas - Type I-E/I-F
+AcrIE8	CRISPR-Cas - Type I-E
+AcrIE9	CRISPR-Cas - Type I-E
+AcrIE10	CRISPR-Cas - Type I-E
+AcrIF1	CRISPR-Cas - Type I-F
+AcrIF2	CRISPR-Cas - Type I-F
+AcrIF3	CRISPR-Cas - Type I-F
+AcrIF4	CRISPR-Cas - Type I-F
+AcrIF5	CRISPR-Cas - Type I-F
+AcrIF6	CRISPR-Cas - Type I-F/I-E
+AcrIF7	CRISPR-Cas - Type I-F
+AcrIF8	CRISPR-Cas - Type I-F
+AcrIF9	CRISPR-Cas - Type I-F
+AcrIF10	CRISPR-Cas - Type I-F
+AcrIF11	CRISPR-Cas - Type I-F
+AcrIF12	CRISPR-Cas - Type I-F
+AcrIF13	CRISPR-Cas - Type I-F
+AcrIF14	CRISPR-Cas - Type I-F
+AcrIF15	CRISPR-Cas - Type I-F
+AcrIF16	CRISPR-Cas - Type I-F
+AcrIF17	CRISPR-Cas - Type I-F
+AcrIF18	CRISPR-Cas - Type I-F/I-E
+AcrIF19	CRISPR-Cas - Type I-F
+AcrIF20	CRISPR-Cas - Type I-F
+AcrIF21	CRISPR-Cas - Type I-F
+AcrIF22	CRISPR-Cas - Type I-F/I-E
+AcrIF23	CRISPR-Cas - Type I-F
+AcrIF24	CRISPR-Cas - Type I-F
+AcrIF25	CRISPR-Cas - Type I-F
+AcrIIA1	CRISPR-Cas - Type II-A
+AcrIIA2	CRISPR-Cas - Type II-A
+AcrIIA3	CRISPR-Cas - Type II-A
+AcrIIA4	CRISPR-Cas - Type II-A
+AcrIIA5	CRISPR-Cas - Type II-A
+AcrIIA6	CRISPR-Cas - Type II-A
+AcrIIA7	CRISPR-Cas - Type II-A
+AcrIIA8	CRISPR-Cas - Type II-A
+AcrIIA9	CRISPR-Cas - Type II-A
+AcrIIA10	CRISPR-Cas - Type II-A
+AcrIIA11	CRISPR-Cas - Type II-A
+AcrIIA12	CRISPR-Cas - Type II-A
+AcrIIA13	CRISPR-Cas - Type II-A
+AcrIIA14	CRISPR-Cas - Type II-A
+AcrIIA15	CRISPR-Cas - Type II-A
+AcrIIA16	CRISPR-Cas - Type II-A
+AcrIIA17	CRISPR-Cas - Type II-A
+AcrIIA18	CRISPR-Cas - Type II-A
+AcrIIA19	CRISPR-Cas - Type II-A
+AcrIIA20	CRISPR-Cas - Type II-A
+AcrIIA21	CRISPR-Cas - Type II-A
+AcrIIA22	CRISPR-Cas - Type II-A
+AcrIIA23	CRISPR-Cas - Type II-A
+AcrIIA24	CRISPR-Cas - Type II-A
+AcrIIA25	CRISPR-Cas - Type II-A
+AcrIIA26	CRISPR-Cas - Type II-A
+AcrIIA27	CRISPR-Cas - Type II-A
+AcrIIA28	CRISPR-Cas - Type II-A
+AcrIIA29	CRISPR-Cas - Type II-A
+AcrIIA30	CRISPR-Cas - Type II-A
+AcrIIA31	CRISPR-Cas - Type II-A
+AcrIIA32	CRISPR-Cas - Type II-A
+AcrIIA33	CRISPR-Cas - Type II-A
+AcrIIA33_Seq	CRISPR-Cas - Type II-A
+AcrIIA34	CRISPR-Cas - Type II-A
+AcrIIC1	CRISPR-Cas - Type II-C
+AcrIIC2	CRISPR-Cas - Type II-C
+AcrIIC3	CRISPR-Cas - Type II-C
+AcrIIC4	CRISPR-Cas - Type II-C
+AcrIIC5	CRISPR-Cas - Type II-C
+AcrIIC6	CRISPR-Cas - Type II-C
+AcrIIC7	CRISPR-Cas - Type II-C
+AcrIIC8	CRISPR-Cas - Type II-C
+AcrIIC9	CRISPR-Cas - Type II-C
+AcrIII_1	CRISPR-Cas - Type Any utilising cA4 as a second messenger
+AcrIIIB1	CRISPR-Cas - Type III-B
+AcrIIIB2	CRISPR-Cas - Type III-B
+AcrVA1	CRISPR-Cas - Type V-A
+AcrVA2	CRISPR-Cas - Type V-A
+AcrVA3	CRISPR-Cas - Type V-A, I-C
+AcrVA4	CRISPR-Cas - Type V-A
+AcrVA5	CRISPR-Cas - Type V-A
+AcrVIA2_new	CRISPR-Cas - Type VI-A
+AcrVIA1_Lwa	CRISPR-Cas - Type VI-A
+AcrVIA2	CRISPR-Cas - Type VI-A
+AcrVIA3	CRISPR-Cas - Type VI-A
+AcrVIA4	CRISPR-Cas - Type VI-A
+AcrVIA5	CRISPR-Cas - Type VI-A
+AcrVIA6	CRISPR-Cas - Type VI-A
+AcrVIA7	CRISPR-Cas - Type VI-A
+AcrVIB1	CRISPR-Cas - Type VI-B
+Dap1	HNH
+Dap2	T3SS(EXsA)
+nip	NADase
+NAMPT_HUMAN_2	NADP
+NAMPT_XANC	NADP
+danM	RM; DNA adenine methylase;Type II methyltransferase M1.DpnII
+dam_3	RM; DNA adenine methylase
+ELAC_like	Putative Ribonuclease
+YhfI_2	Unknown
+MBLBt2	metallo-beta-lactamase
+Apyc1_J14	Pycsa
+Apyc1_apo2	Pycsa
+AFV3_109	a highly conserved protein(unknown function)
+B116	DNA Binding Protein
+NadM-Nudix	NADP/ADPRP
+NadM-Nudix_2	NADP
+Prs	NADP
+Prs_2	NADP
+Prs_3	NADP
+ugi_3	RM
+ORF14_SIFV	Unknown
+ORF99_AFV1	Unknown
+AcrIIA2_2	CRISPR-Cas - Type II-A
+SptTad2	CBASS
+klca_2	RM
+ArdB_2	HYDROLASE INHIBITOR
+ydiL	unknown function
+aca2_2	CRISPR-Cas 
+AcrIIA13b	CRISPR-Cas - Type II-A
+acb1_2	CBASS
+AcrF3	CRISPR-Cas
+tad1_cm	Thoeris
+dmd_2	histone deacetylase
+AcrIIA25_2	CRISPR-Cas 
+AcrIIC4_2	CRISPR-Cas - Type -C
+AcrIIIB2_2	CRISPR-Cas - Type III-B
+AcrVA3_2	CRISPR-Cas
+Adfm_1	DarTG
+DarG	DarTG
+Adfb	DarTG
+Adfn_t4	DarTG
+Adfm_2	DarTG
+Adfm_4	DarTG
+Adfm_3	DarTG
+JSS1_004	DndFGH / CRISPR / QatABCD / SIR2+HerA
+Acb4	CBASS
+RelB	RelE/TA
+5004	RelE/TA
+5021	RelE/TA
+5061	RelE/TA
+5277	RelE/TA
+Gp48	DNA
+BxaP	BREX/RM
+TOXI	ToxIN/TA
+RT	Retron-Sen2
+AbiEi	AbiEii/TA
+ardk_2	RM
+namat_sp	NAD
+tad2_spo1	Thoeris; CBASS
+SSB	Klebsiella pneumoniae subsp. pneumoniae MGH 78578(Expression System: Escherichia coli BL21)
+bet	RECOMBINATION/DNA
+Prs_like4	TRANSFERASE
+Prs_like5	TRANSFERASE
+PAP39	REGULATORY PROTEIN
+Prps1	TRANSFERASE
+PAP41	TRANSFERASE
+prsA	TRANSFERASE
+Prs_like6	TRANSFERASE
+prsA_2	TRANSFERASE
+prs_R32	TRANSFERASE
+Mcbe1	TRANSFERASE
+tRNase	HYDROLASE
+RNaseZ	HYDROLASE
+PhnP	HYDROLASE
+PhnP_new	HYDROLASE
+Q8A8B0	STRUCTURAL GENOMICS, UNKNOWN FUNCTION
+TTHA0132	UNKNOWN FUNCTION
+C6orf130	GENE REGULATION
+OR342	DE NOVO PROTEIN
+Poa1p	HYDROLASE
+CbTad1	VIRAL PROTEIN
+SSO0001	UNKNOWN FUNCTION
+Retron_Ec86	RNA BINDING PROTEIN/DNA/RNA
+Retron_Eco7	RNA BINDING PROTEIN
+YMDB	HYDROLASE
+ZipD	HYDROLASE
+tRNase_Z	HYDROLASE
+T6c	HYDROLASE
+BAB1_1016	HYDROLASE
+SCO6735	HYDROLASE
+VEEV	VIRAL PROTEIN
+P1234	VIRAL PROTEIN
+parp14	TRANSFERASE
+GDAP2	SIGNALING PROTEIN
+ORF1a	VIRAL PROTEIN
+MacroD2	HYDROLASE
+NSP3	VIRAL PROTEIN
+rep	HYDROLASE
+EF2626	TRANSFERASE
+PQQ	HYDROLASE
+Rnase_ZS1	RNA BINDING PROTEIN
+rep_bat	HYDROLASE
+TM_1162	HYDROLASE
+UPF0173	METAL BINDING PROTEIN
+AcrIE10_like	Immune System/RNA
+Tfu_1588	IMMUNE SYSTEM
+casC	IMMUNE SYSTEM/RNA
+arda_2	REPLICATION INHIBITOR
+CbbQO	CHAPERONE
