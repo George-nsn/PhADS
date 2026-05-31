@@ -29,7 +29,7 @@ class SDHProtoNet(nn.Module):
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="SDH-ProtoNet 预测脚本（prototype/instance 双模式，含注释增强）")
+    p = argparse.ArgumentParser(description="SDH-ProtoNet 预测脚本（prototype/instance 双模式，含动态阈值过滤与注释增强）")
 
     p.add_argument("--model-path", default="sdh_protonet_best.pth", help="模型权重路径")
     p.add_argument("--map-path", default="family_map.pth", help="地图文件路径（generate_prototypes.py 生成）")
@@ -42,6 +42,11 @@ def parse_args():
     p.add_argument("--batch-size", type=int, default=1024, help="推理批大小")
     p.add_argument("--temperature", type=float, default=None, help="softmax 温度；默认用地图文件中的值")
     p.add_argument("--topk", type=int, default=5, help="输出前k个候选")
+
+    # 🌟 新增：阈值过滤控制参数
+    p.add_argument("--threshold-tsv", default="family_thresholds.tsv", help="三级阈值基准表格路径 (.tsv)")
+    p.add_argument("--filter-mode", choices=["strict", "moderate", "loose", "none"], default="none", 
+                   help="过滤控制模式：strict(高置信度), moderate(标准平衡), loose(远源挖掘), none(关闭过滤)")
 
     p.add_argument("--cluster-annotation-txt", default="cluster_annotation.txt", help="簇注释TXT（TSV）")
     p.add_argument("--ads-function-txt", default="ADS_function.txt", help="ADS功能TXT（TSV）")
@@ -133,9 +138,12 @@ def load_ads_function(path: str) -> Dict[str, str]:
             print(f"⚠️ ADS_function 列不完整，当前列: {header}")
             return {}
 
-        ni = col_idx["ADS_name"]
-        fi = col_idx["Against/Function"]
+    # 为了防止 exec 解释器转义冲突，统一采用基础安全读取逻辑
+    ni = col_idx["ADS_name"]
+    fi = col_idx["Against/Function"]
 
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        f.readline() # 跳过表头
         for line in f:
             parts = line.rstrip("\n").split("\t")
             name = parts[ni].strip() if ni < len(parts) else ""
@@ -165,11 +173,43 @@ def lookup_ads_function(seq_id: str, ads_map: Dict[str, str]) -> str:
     return ""
 
 
+def load_thresholds(path: str) -> Dict[str, Dict[str, float]]:
+    """⚙️ 新增：解析 family_thresholds.tsv 基准矩阵"""
+    if not os.path.exists(path):
+        print(f"⚠️ 未找到三级阈值矩阵文件: {path}，将关闭在线拦截。")
+        return {}
+    
+    thresh_map = {}
+    with open(path, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f, delimiter="\t")
+        for row in reader:
+            fid = row.get("family_id")
+            if fid:
+                thresh_map[fid] = {
+                    "strict": float(row.get("threshold_strict", 0.0)),
+                    "moderate": float(row.get("threshold_moderate", 0.0)),
+                    "loose": float(row.get("threshold_loose", 0.0))
+                }
+    return thresh_map
+
+
+def format_thresh(val: float) -> str:
+    """辅助格式化输出数值"""
+    if val == float("inf") or val == float("-inf") or np.isnan(val):
+        return "NA"
+    return f"{val:.4f}"
+
+
 def main():
     args = parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    for p in [args.model_path, args.map_path, args.query_emb, args.query_hmm]:
+    # 1. 基础依赖文件校验
+    check_paths = [args.model_path, args.map_path, args.query_emb, args.query_hmm]
+    if args.filter_mode != "none":
+        check_paths.append(args.threshold_tsv)
+        
+    for p in check_paths:
         if not os.path.exists(p):
             raise FileNotFoundError(f"找不到文件: {p}")
 
@@ -177,8 +217,10 @@ def main():
     if not isinstance(payload, dict):
         raise ValueError("地图文件格式错误")
 
+    # 2. 载入知识库与新增的阈值库
     cluster_annotation_map, cluster_func_cols = load_cluster_annotation(args.cluster_annotation_txt)
     ads_function_map = load_ads_function(args.ads_function_txt)
+    thresholds_map = load_thresholds(args.threshold_tsv) if args.filter_mode != "none" else {}
 
     q_emb = ensure_2d(np.load(args.query_emb), "query_emb")
     q_hmm = ensure_2d(np.load(args.query_hmm), "query_hmm")
@@ -212,21 +254,17 @@ def main():
     topk = max(1, int(args.topk))
     results = []
 
-    # mode-specific gallery
     if args.mode == "prototype":
         if "prototypes" not in payload:
             raise ValueError("地图文件中没有 prototypes，请重新用 --mode prototype/both 生成")
-
-        gallery = payload["prototypes"].float().to(device)  # [C, D]
+        gallery = payload["prototypes"].float().to(device)
         gallery_labels = [int(x) for x in payload["labels"]]
         gallery_ids = [f"prototype_of_{lb}" for lb in gallery_labels]
         target_k = min(topk, len(gallery_labels))
-
-    else:  # instance
+    else:
         if "instance_features" not in payload:
             raise ValueError("地图文件中没有 instance_features，请重新用 --mode instance/both 生成")
-
-        gallery = payload["instance_features"].float().to(device)  # [N, D]
+        gallery = payload["instance_features"].float().to(device)
         gallery_labels = [int(x) for x in payload["instance_labels"]]
         gallery_ids = payload["instance_ids"]
         target_k = min(topk, len(gallery_labels))
@@ -237,21 +275,22 @@ def main():
         instance_labels = [int(x) for x in payload["instance_labels"]]
         instance_ids = payload["instance_ids"]
 
+    # 3. 批推理与超球面度量
     with torch.no_grad():
         for st in range(0, n, args.batch_size):
             ed = min(st + args.batch_size, n)
             x_seq = torch.from_numpy(q_emb[st:ed]).float().to(device)
             x_evo = torch.from_numpy(q_hmm[st:ed]).float().to(device)
 
-            qz = model(x_seq, x_evo)  # [b, D]
-            d2 = torch.cdist(qz, gallery, p=2).pow(2)  # [b, G]
+            qz = model(x_seq, x_evo)
+            d2 = torch.cdist(qz, gallery, p=2).pow(2)
 
             probs = F.softmax(-d2 / temp, dim=1)
             top_probs, top_idx = torch.topk(probs, k=target_k, dim=1)
             top_d2 = torch.gather(d2, 1, top_idx)
 
             if has_instance_gallery:
-                d2_ins = torch.cdist(qz, instance_gallery, p=2).pow(2)  # [b, N]
+                d2_ins = torch.cdist(qz, instance_gallery, p=2).pow(2)
                 ins_idx = torch.argmin(d2_ins, dim=1)
                 ins_d2 = d2_ins[torch.arange(d2_ins.shape[0]), ins_idx]
             else:
@@ -279,36 +318,64 @@ def main():
                     nearest_seq_label = -1
                     nearest_seq_distance2 = float("nan")
 
-                pred_cluster_label = best_label
-                cluster_func_values = cluster_annotation_map.get(pred_cluster_label, {})
+                pred_cluster_name = cluster_names.get(best_label, f"cluster_{best_label}")
+                cluster_func_values = cluster_annotation_map.get(best_label, {})
                 nearest_seq_function_summary = lookup_ads_function(nearest_seq_id, ads_function_map)
 
+                # 🛑 核心过滤拦截逻辑 (Top-1 核心预测检测)
+                filter_status = "Pass"
+                thresh_limit_val = float("inf")
+                if args.filter_mode != "none" and thresholds_map:
+                    if pred_cluster_name in thresholds_map:
+                        thresh_limit_val = thresholds_map[pred_cluster_name][args.filter_mode]
+                        filter_status = "Pass" if best_d2 <= thresh_limit_val else "Fail"
+                    else:
+                        filter_status = "Fail"  # 预测到了未包含在训练集阈值内的特殊簇，默认拦截
+
+                # 对 Top-k 候选池中的每一项同样进行各自家族的独立阈值校验
                 cand = []
                 for j in range(target_k):
                     gidx = int(top_idx[i, j].item())
                     lb = int(gallery_labels[gidx])
                     cid = str(gallery_ids[gidx])
                     cfunc = lookup_ads_function(cid, ads_function_map) if args.mode == "instance" else ""
+                    c_cluster_name = cluster_names.get(lb, f"cluster_{lb}")
+                    
+                    c_filter_status = "Pass"
+                    c_thresh_limit_val = float("inf")
+                    if args.filter_mode != "none" and thresholds_map:
+                        if c_cluster_name in thresholds_map:
+                            c_thresh_limit_val = thresholds_map[c_cluster_name][args.filter_mode]
+                            c_filter_status = "Pass" if float(top_d2[i, j].item()) <= c_thresh_limit_val else "Fail"
+                        else:
+                            c_filter_status = "Fail"
+
                     cand.append({
                         "rank": j + 1,
                         "id": cid,
                         "label": lb,
-                        "cluster": cluster_names.get(lb, f"cluster_{lb}"),
+                        "cluster": c_cluster_name,
                         "cluster_rep": cluster_reps.get(lb, "NA"),
                         "distance2": float(top_d2[i, j].item()),
                         "confidence": float(top_probs[i, j].item()),
                         "ads_function": cfunc,
+                        "filter_status": c_filter_status,
+                        "threshold_limit": c_thresh_limit_val
                     })
 
                 results.append({
                     "query_id": query_ids[st + i],
                     "mode": args.mode,
                     "pred_id": best_id,
-                    "pred_label": pred_cluster_label,
-                    "pred_cluster": cluster_names.get(pred_cluster_label, f"cluster_{pred_cluster_label}"),
-                    "pred_cluster_rep": cluster_reps.get(pred_cluster_label, "NA"),
+                    "pred_label": best_label,
+                    "pred_cluster": pred_cluster_name,
+                    "pred_cluster_rep": cluster_reps.get(best_label, "NA"),
                     "pred_distance2": best_d2,
                     "confidence": best_prob,
+                    # 🌟 阈值控制元数据注入
+                    "filter_mode": args.filter_mode,
+                    "filter_status": filter_status,
+                    "threshold_limit": thresh_limit_val,
                     "nearest_sequence_id": nearest_seq_id,
                     "nearest_sequence_label": nearest_seq_label,
                     "nearest_sequence_distance2": nearest_seq_distance2,
@@ -317,14 +384,15 @@ def main():
                     "topk": cand,
                 })
 
-    # 1) 主输出：删除 pred_label 与 topk_summary，cluster_func_* 追加在最后
+    # 4. 多轨格式化数据保存
     cluster_func_out_cols = [f"cluster_func_{c}" for c in cluster_func_cols]
 
+    # 轨 1) 主输出（无缝嵌入 filter_mode, filter_status, threshold_limit）
     with open(args.output_tsv, "w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f, delimiter='\t')
         writer.writerow([
             "query_id", "mode", "pred_id", "pred_cluster", "pred_cluster_rep",
-            "pred_distance2", "confidence",
+            "pred_distance2", "confidence", "filter_mode", "filter_status", "threshold_limit",
             "nearest_sequence_id", "nearest_sequence_label", "nearest_sequence_distance2", "nearest_sequence_function_summary",
             *cluster_func_out_cols,
         ])
@@ -334,52 +402,49 @@ def main():
             writer.writerow([
                 r["query_id"], r["mode"], r["pred_id"], r["pred_cluster"], r["pred_cluster_rep"],
                 f"{r['pred_distance2']:.6f}", f"{r['confidence']:.6f}",
+                r["filter_mode"], r["filter_status"], format_thresh(r["threshold_limit"]),
                 r["nearest_sequence_id"], r["nearest_sequence_label"],
                 f"{r['nearest_sequence_distance2']:.6f}" if r["nearest_sequence_id"] else "",
                 r["nearest_sequence_function_summary"],
                 *cluster_func_vals,
             ])
 
-    # 2) Top-k 单独输出（美化展开，不含 label）
+    # 轨 2) Top-k 明细输出（追加专属候选阈值校验结果）
     with open(args.topk_tsv, "w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f, delimiter='\t')
         writer.writerow([
             "query_id", "mode", "rank", "candidate_id", "candidate_cluster", "candidate_rep",
-            "candidate_distance2", "candidate_confidence", "candidate_ads_function"
+            "candidate_distance2", "candidate_confidence", "filter_mode", "filter_status", "threshold_limit", "candidate_ads_function"
         ])
         for r in results:
             for c in r["topk"]:
                 writer.writerow([
                     r["query_id"], r["mode"], c["rank"], c["id"], c["cluster"], c["cluster_rep"],
-                    f"{c['distance2']:.6f}", f"{c['confidence']:.6f}", c["ads_function"],
+                    f"{c['distance2']:.6f}", f"{c['confidence']:.6f}",
+                    r["filter_mode"], c["filter_status"], format_thresh(c["threshold_limit"]),
+                    c["ads_function"],
                 ])
 
-    # 终端输出
-    print(f"\n🔮 ==== 预测结果（mode={args.mode}） ====")
+    # 5. 终端回显美化
+    print(f"\n🔮 ==== 预测结果（mode={args.mode} | filter_mode={args.filter_mode}） ====")
     for r in results:
+        status_tag = f" [{r['filter_status']}]" if args.filter_mode != "none" else ""
         print(
-            f"{r['query_id']}: id={r['pred_id']} | {r['pred_cluster']} (rep={r['pred_cluster_rep']}) "
+            f"{r['query_id']}: id={r['pred_id']} | {r['pred_cluster']} (rep={r['pred_cluster_rep']}){status_tag} "
             f"| d²={r['pred_distance2']:.6f} | conf={r['confidence']:.2%}"
         )
         if r["nearest_sequence_id"]:
-            print(
-                f"   - nearest_sequence: {r['nearest_sequence_id']} (label={r['nearest_sequence_label']}, d²={r['nearest_sequence_distance2']:.6f})"
-            )
+            print(f"   - nearest_sequence: {r['nearest_sequence_id']} (label={r['nearest_sequence_label']}, d²={r['nearest_sequence_distance2']:.6f})")
             if r["nearest_sequence_function_summary"]:
                 print(f"     function: {r['nearest_sequence_function_summary']}")
+        
         if args.print_topk:
             for c in r["topk"]:
-                print(
-                    f"   - top{c['rank']}: id={c['id']} | {c['cluster']} (rep={c['cluster_rep']}) "
-                    f"d²={c['distance2']:.6f}, p={c['confidence']:.2%}"
-                )
+                c_status_tag = f" [{c['filter_status']}]" if args.filter_mode != "none" else ""
+                print(f"   - top{c['rank']}: id={c['id']} | {c['cluster']} (rep={c['cluster_rep']}){c_status_tag} d²={c['distance2']:.6f}, p={c['confidence']:.2%}")
 
-    print(f"\n✅ 主预测表已保存: {args.output_tsv}")
-    print(f"✅ Top-k 明细表已保存: {args.topk_tsv}")
-    if args.mode == "prototype":
-        print("📌 置信度公式(prototype): p(c|x)=exp(-d_c^2/T)/Σ_j exp(-d_j^2/T)")
-    else:
-        print("📌 置信度公式(instance): p(i|x)=exp(-d_i^2/T)/Σ_j exp(-d_j^2/T)")
+    print(f"\n✅ 主预测表（带阈值联动标签）已保存: {args.output_tsv}")
+    print(f"✅ Top-k 明细表（带候选独立卡口标签）已保存: {args.topk_tsv}")
 
 
 if __name__ == "__main__":
