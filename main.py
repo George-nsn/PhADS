@@ -9,6 +9,7 @@
 - CNN 权重: database/cnn_chkpnt/model.pt
 - PhADS model: database/PhADS_model/sdh_protonet_best.pth
 - PhADS map: database/PhADS_model/family_map.pth
+- PhADS thresholds: database/PhADS_model/family_thresholds.tsv
 - 注释库: database/anno_database/{cluster_annotation.txt, ADS_function.txt}
 
 说明：
@@ -49,11 +50,13 @@ def parse_args():
             "Output schema:\n"
             "  1) --predict-output (TSV)\n"
             "     query_id, mode, pred_id, pred_cluster, pred_cluster_rep,\n"
-            "     pred_distance2, confidence, nearest_sequence_id, nearest_sequence_label,\n"
-            "     nearest_sequence_distance2, nearest_sequence_function_summary, cluster_func_*\n\n"
+            "     pred_distance2, confidence, filter_mode, filter_status, threshold_limit,\n"
+            "     nearest_sequence_id, nearest_sequence_label, nearest_sequence_distance2,\n"
+            "     nearest_sequence_function_summary, cluster_func_*\n\n"
             "  2) --predict-topk-output (TSV)\n"
             "     query_id, mode, rank, candidate_id, candidate_cluster, candidate_rep,\n"
-            "     candidate_distance2, candidate_confidence, candidate_ads_function"
+            "     candidate_distance2, candidate_confidence, filter_mode, filter_status,\n"
+            "     threshold_limit, candidate_ads_function"
         ),
         formatter_class=argparse.RawTextHelpFormatter,
     )
@@ -75,6 +78,20 @@ def parse_args():
     p.add_argument("--predict-output", default="prediction_results.tsv", help="Filename of the main prediction TSV in work-dir.")
     p.add_argument("--predict-topk-output", default="prediction_topk.tsv", help="Filename of the Top-k TSV in work-dir.")
     p.add_argument("--print-topk", action="store_true", help="Print Top-k candidates to stdout.")
+
+    # 🌟 新增参数：过滤控制模式 (默认值为 moderate)
+    p.add_argument(
+        "--filter-mode",
+        choices=["strict", "moderate", "loose", "none"],
+        default="moderate",
+        help=(
+            "Control mode for filtering based on squared latent space distance thresholds.\n"
+            "  strict   : Tight firewall limit (P90 training bounds, minimizes false positives).\n"
+            "  moderate : Balanced firewall limit (P95 training bounds, recommended standard mode).\n"
+            "  loose    : Relaxed firewall limit (Outlier boundaries, aims for divergent discovery).\n"
+            "  none     : Disable online filtering (Backward compatible, preserves raw results)."
+        )
+    )
 
     p.add_argument("--qc-txt", default="qc_report.txt", help="Filename of the plain-text QC report in work-dir.")
     p.add_argument("--qc-json", default="qc_report.json", help="Filename of the JSON QC report in work-dir.")
@@ -235,7 +252,7 @@ def make_qc_report(seq_ids: List[str], emb_stats: Dict, dom_stats: Dict, emb_npy
             "matrix": emb_mat,
         },
         "hmmscan": {
-            **dom_stats,
+            "dom_stats": dom_stats,
             "matched_query_ratio": float(hmm_match_ratio),
         },
         "hmm_feature": {
@@ -270,10 +287,10 @@ def write_qc_reports(report: Dict, txt_path: Path, json_path: Path):
     lines.append("")
 
     lines.append("[hmmscan]")
-    hs = report['hmmscan']
+    hs = report['hmmscan']['dom_stats']
     lines.append(f"- domtblout 命中行数: {hs['total_hit_lines']}")
     lines.append(f"- 命中输入序列的行数: {hs['matched_query_hits']}")
-    lines.append(f"- 至少命中1次的输入序列数: {hs['matched_query_count']} ({hs['matched_query_ratio']:.2%})")
+    lines.append(f"- 至少命中1次的输入序列数: {hs['matched_query_count']} ({report['hmmscan']['matched_query_ratio']:.2%})")
     lines.append("")
 
     lines.append("[HMM特征矩阵]")
@@ -309,6 +326,8 @@ def resolve_auto_paths(script_dir: Path, args):
         "cnn_weights": (db_dir / "cnn_chkpnt" / "model.pt").resolve(),
         "predict_model": (db_dir / "PhADS_model" / "sdh_protonet_best.pth").resolve(),
         "predict_map": (db_dir / "PhADS_model" / "family_map.pth").resolve(),
+        # 🌟 按照要求：无缝集成 family_thresholds.tsv 路径到自动路径树中
+        "family_thresholds": (db_dir / "PhADS_model" / "family_thresholds.tsv").resolve(),
         "cluster_annotation": (db_dir / "anno_database" / "cluster_annotation.txt").resolve(),
         "ads_function": (db_dir / "anno_database" / "ADS_function.txt").resolve(),
     }
@@ -319,6 +338,9 @@ def resolve_auto_paths(script_dir: Path, args):
                 raise FileNotFoundError(f"找不到脚本: {v}")
         else:
             if v is None:
+                continue
+            # 如果没有开启过滤，允许缺失阈值矩阵而不引发崩溃异常
+            if k == "family_thresholds" and getattr(args, "filter_mode", "moderate") == "none":
                 continue
             if not v.exists():
                 raise FileNotFoundError(f"找不到路径({k}): {v}")
@@ -332,6 +354,8 @@ def run_self_check(script_dir: Path):
         db_dir / "cnn_chkpnt" / "model.pt",
         db_dir / "PhADS_model" / "sdh_protonet_best.pth",
         db_dir / "PhADS_model" / "family_map.pth",
+        # 🌟 自检模块同步加入该判定，保障数据库绝对完整性
+        db_dir / "PhADS_model" / "family_thresholds.tsv",
         db_dir / "anno_database" / "cluster_annotation.txt",
         db_dir / "anno_database" / "ADS_function.txt",
     ]
@@ -433,7 +457,7 @@ def main():
     qc_json_path = work_dir / args.qc_json
     write_qc_reports(qc_report, qc_txt_path, qc_json_path)
 
-    # 7) 调用 predict.py（query 路径全部来自 temp）
+    # 7) 调用 predict.py（注入新增的动态阈值控制参数）
     predict_out = (work_dir / args.predict_output).resolve()
     predict_topk_out = (work_dir / args.predict_topk_output).resolve()
     cmd_predict = [
@@ -450,6 +474,9 @@ def main():
         "--topk", str(args.topk),
         "--output-tsv", str(predict_out),
         "--topk-tsv", str(predict_topk_out),
+        # 🌟 透传动态拦截所需元数据路径与模式开关
+        "--threshold-tsv", str(paths["family_thresholds"]),
+        "--filter-mode", str(args.filter_mode),
     ]
     if args.print_topk:
         cmd_predict.append("--print-topk")
