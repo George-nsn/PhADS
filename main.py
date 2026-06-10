@@ -7,13 +7,17 @@
 默认自动路径（相对 main.py 所在目录）：
 - HMM DB: database/hmm_model/anti_defense_system.hmm
 - CNN 权重: database/cnn_chkpnt/model.pt
-- PhADS model: database/PhADS_model/sdh_protonet_best.pth
-- PhADS map: database/PhADS_model/family_map.pth
-- PhADS thresholds: database/PhADS_model/family_thresholds.tsv
+- Single PhADS model: database/PhADS_model/one_model/sdh_protonet_best.pth
+- Single PhADS map: database/PhADS_model/one_model/family_map.pth
+- Single PhADS thresholds: database/PhADS_model/one_model/family_thresholds.tsv
+- Mix PhADS model: database/PhADS_model/mix_model/sdh_protonet_crossattn_best.pth
+- Mix PhADS map: database/PhADS_model/mix_model/family_map.pth
+- Mix PhADS thresholds: database/PhADS_model/mix_model/family_thresholds.tsv
 - 注释库: database/anno_database/{cluster_annotation.txt, ADS_function.txt}
 
 说明：
-- ProstT5 模型路径必须通过 `-db/--mode-path` 指定
+- ESM2 / ProtT5 下载模型根目录通过 `-db/--mode-path` 指定
+- 该目录应包含 esm2_t33_650M_UR50D 和 prot-t5-xl-uniref50-enc-onnx 两个子目录
 - 不再依赖 cluster_merge_final.txt
 
 临时目录规则：
@@ -43,6 +47,10 @@ import torch
 
 
 APP_VERSION = "0.1"
+ESM2_MODEL_DIRNAME = "esm2_t33_650M_UR50D"
+PROST_MODEL_DIRNAME = "prot-t5-xl-uniref50-enc-onnx"
+DEFAULT_ESM2_DIM = 1280
+DEFAULT_PROST_DIM = 1024
 
 
 def parse_args():
@@ -75,10 +83,10 @@ def parse_args():
     # ── Subcommands ──
     sub = p.add_subparsers(dest="command", help="Available subcommands")
 
-    db_parser = sub.add_parser("database", help="Download ProstT5 model to a specified directory")
+    db_parser = sub.add_parser("database", help="Download ESM2 and ProtT5 models to a specified directory")
     db_parser.add_argument(
         "--path", "-P", required=True, dest="download_path",
-        help="Target directory to download the ProstT5 model into."
+        help="Target root directory to download esm2_t33_650M_UR50D and prot-t5-xl-uniref50-enc-onnx into."
     )
 
     # ── Pipeline arguments (used when command is None) ──
@@ -96,10 +104,16 @@ def parse_args():
     )
 
     p.add_argument("--db", "--mode-path", dest="mode_path", required=False,
-                   help="Path to the ProstT5 model directory (not required for --predict-mode foldseek/hmm).")
+                   help="Path to downloaded embedding model root containing esm2_t33_650M_UR50D and prot-t5-xl-uniref50-enc-onnx.")
 
     p.add_argument("--predict-mode", choices=["prototype", "instance", "foldseek", "hmm"], default="prototype",
                    help="Prediction mode: prototype | instance | foldseek (structural) | hmm (HMM-only).")
+    p.add_argument("--model-type", choices=["single", "mix"], default="single",
+                   help="PhADS deep model type for prototype/instance mode: single | mix.")
+    p.add_argument("--query-emb-esm2", default=None,
+                   help="Mix mode only: prebuilt ESM2 query embedding .npy. If omitted, main.py generates it from --db/esm2_t33_650M_UR50D.")
+    p.add_argument("--esm2-emb-dir", default=None,
+                   help="Mix mode only: directory containing per-sequence ESM2 *_embedding.pt files to build query_embeddings_esm2.npy.")
     p.add_argument("--prob-threshold", "-prob", dest="prob_threshold", type=float, default=0.8,
                    help="Foldseek mode: minimum prob score to retain a hit (default: 0.8).")
     p.add_argument("--topk", type=int, default=5, help="Number of top candidates to report.")
@@ -272,7 +286,7 @@ def print_header(config_items: List[tuple]):
 def print_download_header(path: str):
     """Print header for download mode."""
     w = _box_width()
-    title = f"  PhADS v{APP_VERSION} — Download ProstT5 Model"
+    title = f"  PhADS v{APP_VERSION} — Download Embedding Models"
     print()
     print("╔" + "═" * w + "╗")
     print(f"║{title:<{w}}║")
@@ -402,6 +416,64 @@ def build_embedding_npy(seq_ids: List[str], emb_dir: Path, out_npy: Path, emb_di
         "missing_ids": missing,
         "shape": [int(arr.shape[0]), int(arr.shape[1])],
     }
+
+
+def run_embedding_generation(paths: Dict, script_dir: Path, input_fasta: Path, output_dir: Path,
+                             model_path: Path, args, log_file: Path):
+    run_cmd([
+        sys.executable,
+        str(paths["translate_py"]),
+        "-i", str(input_fasta),
+        "-o", str(output_dir),
+        "-n", str(args.cpu),
+        "--model-path", str(model_path),
+        "--model-kind", "auto",
+        "--cnn-weights", str(paths["cnn_weights"]),
+        "--device", str(args.device),
+    ], cwd=script_dir, log_file=log_file)
+
+
+def resolve_mix_esm2_embedding(args, seq_ids: List[str], temp_dir: Path, output_stem: Optional[str] = None,
+                               expected_dim: int = DEFAULT_ESM2_DIM) -> tuple:
+    out_name = f"{output_stem}_query_embeddings_esm2.npy" if output_stem else "query_embeddings_esm2.npy"
+    default_npy = temp_dir / out_name
+
+    if args.query_emb_esm2:
+        emb_arg = Path(args.query_emb_esm2)
+        candidate = emb_arg / out_name if emb_arg.is_dir() else emb_arg
+        candidate = candidate.resolve()
+        if not candidate.exists():
+            raise FileNotFoundError(f"Mix 模式找不到 ESM2 query embedding: {candidate}")
+        arr = analyze_npy(candidate)
+        if arr["shape"][0] != len(seq_ids):
+            raise ValueError(f"ESM2 query embedding 样本数不一致: got={arr['shape'][0]}, expect={len(seq_ids)}")
+        if arr["shape"][1] != expected_dim:
+            raise ValueError(f"ESM2 query embedding 维度不一致: got={arr['shape'][1]}, expect={expected_dim}")
+        return candidate, {"source": "prebuilt_npy", "shape": arr["shape"]}
+
+    if args.esm2_emb_dir:
+        emb_dir = Path(args.esm2_emb_dir).resolve()
+        if output_stem and (emb_dir / output_stem).is_dir():
+            emb_dir = emb_dir / output_stem
+        if not emb_dir.is_dir():
+            raise NotADirectoryError(f"Mix 模式 ESM2 embedding 目录不存在: {emb_dir}")
+        stats = build_embedding_npy(seq_ids=seq_ids, emb_dir=emb_dir, out_npy=default_npy, emb_dim=expected_dim)
+        stats["source"] = "pt_dir"
+        return default_npy.resolve(), stats
+
+    if default_npy.exists():
+        arr = analyze_npy(default_npy)
+        if arr["shape"][0] != len(seq_ids):
+            raise ValueError(f"默认 ESM2 query embedding 样本数不一致: got={arr['shape'][0]}, expect={len(seq_ids)}")
+        if arr["shape"][1] != expected_dim:
+            raise ValueError(f"默认 ESM2 query embedding 维度不一致: got={arr['shape'][1]}, expect={expected_dim}")
+        return default_npy.resolve(), {"source": "temp_default", "shape": arr["shape"]}
+
+    raise FileNotFoundError(
+        "Mix 模式需要 ESM2 query embedding。请提供 --query-emb-esm2 <npy>，"
+        "或提供 --esm2-emb-dir <包含 *_embedding.pt 的目录>，"
+        f"或预先生成默认文件: {default_npy}"
+    )
 
 
 def count_domtblout_hits(domtblout_path: Path, seq_ids_set: set) -> Dict:
@@ -542,31 +614,99 @@ def resolve_temp_dir(temp_arg: str | None) -> Path:
     return (Path.cwd() / "temp").resolve()
 
 
+def resolve_downloaded_model_dirs(mode_path: str | None) -> Dict[str, Optional[Path]]:
+    if not mode_path:
+        return {"model_root": None, "esm2_model": None, "prost_model": None}
+
+    root = Path(mode_path).resolve()
+    if root.name == ESM2_MODEL_DIRNAME:
+        model_root = root.parent
+        esm2_model = root
+        prost_model = model_root / PROST_MODEL_DIRNAME
+    elif root.name == PROST_MODEL_DIRNAME:
+        model_root = root.parent
+        esm2_model = model_root / ESM2_MODEL_DIRNAME
+        prost_model = root
+    else:
+        model_root = root
+        esm2_model = model_root / ESM2_MODEL_DIRNAME
+        prost_model = model_root / PROST_MODEL_DIRNAME
+
+    return {"model_root": model_root, "esm2_model": esm2_model, "prost_model": prost_model}
+
+
+def load_family_map_dims(map_path: Path) -> Dict[str, Optional[int]]:
+    if not map_path.exists():
+        return {}
+    payload = torch.load(map_path, map_location="cpu")
+    out: Dict[str, Optional[int]] = {}
+    for key in ("seq_dim", "dim_esm2", "dim_prost", "evo_dim", "latent_dim"):
+        value = payload.get(key) if isinstance(payload, dict) else None
+        out[key] = int(value) if value is not None else None
+    return out
+
+
+def infer_single_embedding_kind(seq_dim: Optional[int]) -> str:
+    return "esm2"
+
+
+def embedding_model_for_kind(model_dirs: Dict[str, Optional[Path]], kind: str) -> Optional[Path]:
+    return model_dirs["prost_model"] if kind.startswith("prost") else model_dirs["esm2_model"]
+
+
 def resolve_auto_paths(script_dir: Path, args):
     db_dir = script_dir / "database"
+    phads_model_dir = db_dir / "PhADS_model"
+    single_model_dir = phads_model_dir / "one_model"
+    mix_model_dir = phads_model_dir / "mix_model"
+    use_mix_model = getattr(args, "model_type", "single") == "mix"
+    selected_model_dir = mix_model_dir if use_mix_model else single_model_dir
+    selected_model_name = "sdh_protonet_crossattn_best.pth" if use_mix_model else "sdh_protonet_best.pth"
+    selected_map = selected_model_dir / "family_map.pth"
+    selected_map_dims = load_family_map_dims(selected_map)
+    model_dirs = resolve_downloaded_model_dirs(args.mode_path)
+    single_embedding_dim = selected_map_dims.get("seq_dim") or DEFAULT_ESM2_DIM
+    single_embedding_kind = infer_single_embedding_kind(single_embedding_dim)
+    mix_esm2_dim = selected_map_dims.get("dim_esm2") or DEFAULT_ESM2_DIM
+    mix_prost_dim = selected_map_dims.get("dim_prost") or DEFAULT_PROST_DIM
+    selected_threshold = selected_model_dir / "family_thresholds.tsv"
+
     out = {
         "translate_py": script_dir / "scripts" / "translate_to_embedding.py",
         "hmm_to_npy_py": script_dir / "scripts" / "hmm_to_npy.py",
         "predict_py": script_dir / "scripts" / "predict.py",
+        "predict_mix_py": script_dir / "scripts" / "predict_mix.py",
         "pyrodigal_gv_py": script_dir / "scripts" / "pyrodigal_viral.py",
         "structure_compare_py": script_dir / "scripts" / "structure_compare.py",
         "foldseek_db": (db_dir / "foldseek_db" / "phads_db").resolve(),
         "hmm_db": (db_dir / "hmm_model" / "anti_defense_system.hmm").resolve(),
-        "prost_model": Path(args.mode_path).resolve() if args.mode_path else None,
+        "model_root": model_dirs["model_root"],
+        "esm2_model": model_dirs["esm2_model"],
+        "prost_model": model_dirs["prost_model"],
+        "single_embedding_kind": single_embedding_kind,
+        "single_embedding_dim": single_embedding_dim,
+        "single_embedding_model": embedding_model_for_kind(model_dirs, single_embedding_kind),
+        "mix_esm2_dim": mix_esm2_dim,
+        "mix_prost_dim": mix_prost_dim,
         "cnn_weights": (db_dir / "cnn_chkpnt" / "model.pt").resolve(),
-        "predict_model": (db_dir / "PhADS_model" / "sdh_protonet_best.pth").resolve(),
-        "predict_map": (db_dir / "PhADS_model" / "family_map.pth").resolve(),
+        "predict_script": (script_dir / "scripts" / ("predict_mix.py" if use_mix_model else "predict.py")).resolve(),
+        "predict_model": (selected_model_dir / selected_model_name).resolve(),
+        "predict_map": selected_map.resolve(),
         # 🌟 按照要求：无缝集成 family_thresholds.tsv 路径到自动路径树中
-        "family_thresholds": (db_dir / "PhADS_model" / "family_thresholds.tsv").resolve(),
+        "family_thresholds": selected_threshold.resolve(),
         "cluster_annotation": (db_dir / "anno_database" / "cluster_annotation.txt").resolve(),
         "ads_function": (db_dir / "anno_database" / "ADS_function.txt").resolve(),
     }
 
     for k, v in out.items():
         if k.endswith("_py"):
+            if k == "predict_mix_py" and not use_mix_model:
+                continue
             if not v.exists():
                 raise FileNotFoundError(f"找不到脚本: {v}")
         else:
+            if k in ("single_embedding_kind", "single_embedding_dim", "mix_esm2_dim", "mix_prost_dim"):
+                continue
             if v is None:
                 continue
             # foldseek / hmm 模式下仅校验各自相关路径
@@ -581,6 +721,17 @@ def resolve_auto_paths(script_dir: Path, args):
                     if not v.exists():
                         raise FileNotFoundError(f"找不到路径({k}): {v}")
                 continue
+            if k == "model_root":
+                continue
+            if k in ("esm2_model", "prost_model"):
+                if use_mix_model or (k == "esm2_model" and single_embedding_kind == "esm2") or (k == "prost_model" and single_embedding_kind == "prostt5"):
+                    if not v.exists():
+                        raise FileNotFoundError(f"找不到下载模型目录({k}): {v}")
+                continue
+            if k == "single_embedding_model":
+                if not v.exists():
+                    raise FileNotFoundError(f"找不到 single 模式 embedding 模型目录: {v}")
+                continue
             # 如果没有开启过滤，允许缺失阈值矩阵而不引发崩溃异常
             if k == "family_thresholds" and getattr(args, "filter_mode", "moderate") == "none":
                 continue
@@ -594,9 +745,12 @@ def run_self_check(script_dir: Path):
     required = [
         db_dir / "hmm_model" / "anti_defense_system.hmm",
         db_dir / "cnn_chkpnt" / "model.pt",
-        db_dir / "PhADS_model" / "sdh_protonet_best.pth",
-        db_dir / "PhADS_model" / "family_map.pth",
-        db_dir / "PhADS_model" / "family_thresholds.tsv",
+        db_dir / "PhADS_model" / "one_model" / "sdh_protonet_best.pth",
+        db_dir / "PhADS_model" / "one_model" / "family_map.pth",
+        db_dir / "PhADS_model" / "one_model" / "family_thresholds.tsv",
+        db_dir / "PhADS_model" / "mix_model" / "sdh_protonet_crossattn_best.pth",
+        db_dir / "PhADS_model" / "mix_model" / "family_map.pth",
+        db_dir / "PhADS_model" / "mix_model" / "family_thresholds.tsv",
         db_dir / "anno_database" / "cluster_annotation.txt",
         db_dir / "anno_database" / "ADS_function.txt",
     ]
@@ -946,8 +1100,17 @@ def run_prototype_instance_single(
         protein_fasta_for_pipeline = pyrodigal_faa_path
 
     # 每个文件使用独立的 embedding 子目录，避免跨文件序列 ID 冲突
-    emb_subdir = temp_dir / output_stem
-    emb_subdir.mkdir(parents=True, exist_ok=True)
+    if args.model_type == "mix":
+        esm2_emb_subdir = temp_dir / f"{output_stem}_esm2"
+        prost_emb_subdir = temp_dir / f"{output_stem}_prost"
+        esm2_emb_subdir.mkdir(parents=True, exist_ok=True)
+        prost_emb_subdir.mkdir(parents=True, exist_ok=True)
+        emb_subdir = prost_emb_subdir
+    else:
+        esm2_emb_subdir = None
+        prost_emb_subdir = None
+        emb_subdir = temp_dir / output_stem
+        emb_subdir.mkdir(parents=True, exist_ok=True)
 
     # query 文件固定放 temp（batch 模式每个文件独立命名避免覆盖）
     protein_ids_path = temp_dir / f"{output_stem}_protein_ids.txt"
@@ -995,28 +1158,42 @@ def run_prototype_instance_single(
     # ── Step 2: Embedding generation ──
     step += 1
     t0 = time.time()
-    print_progress(step, total_steps, f"[{output_stem}] Generating ProstT5 embeddings", "start")
-    run_cmd([
-        sys.executable,
-        str(paths["translate_py"]),
-        "-i", str(protein_fasta_for_pipeline),
-        "-o", str(emb_subdir),
-        "-n", str(args.cpu),
-        "--model-path", str(paths["prost_model"]),
-        "--cnn-weights", str(paths["cnn_weights"]),
-        "--device", str(args.device),
-    ], cwd=script_dir, log_file=log_file)
+    embed_label = "ESM2 + ProtT5" if args.model_type == "mix" else paths["single_embedding_kind"].upper()
+    print_progress(step, total_steps, f"[{output_stem}] Generating {embed_label} embeddings", "start")
+    if args.model_type == "mix":
+        if not args.query_emb_esm2 and not args.esm2_emb_dir:
+            run_embedding_generation(paths, script_dir, protein_fasta_for_pipeline, esm2_emb_subdir,
+                                     paths["esm2_model"], args, log_file)
+        run_embedding_generation(paths, script_dir, protein_fasta_for_pipeline, prost_emb_subdir,
+                                 paths["prost_model"], args, log_file)
+    else:
+        run_embedding_generation(paths, script_dir, protein_fasta_for_pipeline, emb_subdir,
+                                 paths["single_embedding_model"], args, log_file)
     elapsed = time.time() - t0
-    print_progress(step, total_steps, f"[{output_stem}] Generating ProstT5 embeddings", "done", f"{elapsed:.1f}s")
+    print_progress(step, total_steps, f"[{output_stem}] Generating {embed_label} embeddings", "done", f"{elapsed:.1f}s")
 
     # ── Step 3: Build embedding matrix ──
     step += 1
     t0 = time.time()
     print_progress(step, total_steps, f"[{output_stem}] Building embedding matrix", "start")
-    emb_stats = build_embedding_npy(seq_ids=seq_ids, emb_dir=emb_subdir, out_npy=emb_npy_path, emb_dim=1024)
+    emb_dim = int(paths["mix_prost_dim"] if args.model_type == "mix" else paths["single_embedding_dim"])
+    emb_stats = build_embedding_npy(seq_ids=seq_ids, emb_dir=emb_subdir, out_npy=emb_npy_path, emb_dim=emb_dim)
+    esm2_emb_path = None
+    if args.model_type == "mix":
+        if args.query_emb_esm2 or args.esm2_emb_dir:
+            esm2_emb_path, esm2_stats = resolve_mix_esm2_embedding(
+                args, seq_ids, temp_dir, output_stem=output_stem, expected_dim=int(paths["mix_esm2_dim"])
+            )
+        else:
+            esm2_emb_path = temp_dir / f"{output_stem}_query_embeddings_esm2.npy"
+            esm2_stats = build_embedding_npy(seq_ids=seq_ids, emb_dir=esm2_emb_subdir,
+                                             out_npy=esm2_emb_path, emb_dim=int(paths["mix_esm2_dim"]))
     elapsed = time.time() - t0
+    emb_detail = f"{emb_stats['shape'][0]}×{emb_stats['shape'][1]}"
+    if args.model_type == "mix":
+        emb_detail += f" + ESM2 {esm2_stats['shape'][0]}×{esm2_stats['shape'][1]}"
     print_progress(step, total_steps, f"[{output_stem}] Building embedding matrix", "done",
-                   f"{emb_stats['shape'][0]}×{emb_stats['shape'][1]}, {elapsed:.1f}s")
+                   f"{emb_detail}, {elapsed:.1f}s")
 
     # ── Step 4: HMM alignment ──
     step += 1
@@ -1067,10 +1244,18 @@ def run_prototype_instance_single(
     predict_topk_out = (work_dir / f"{output_stem}_prediction_topk.tsv").resolve()
     cmd_predict = [
         sys.executable,
-        str(paths["predict_py"]),
+        str(paths["predict_script"]),
         "--model-path", str(paths["predict_model"]),
         "--map-path", str(paths["predict_map"]),
-        "--query-emb", str(emb_npy_path),
+    ]
+    if args.model_type == "mix":
+        cmd_predict.extend([
+            "--query-emb-esm2", str(esm2_emb_path),
+            "--query-emb-prost5", str(emb_npy_path),
+        ])
+    else:
+        cmd_predict.extend(["--query-emb", str(emb_npy_path)])
+    cmd_predict.extend([
         "--query-hmm", str(hmm_npy_path),
         "--query-ids", str(protein_ids_path),
         "--cluster-annotation-txt", str(paths["cluster_annotation"]),
@@ -1081,7 +1266,7 @@ def run_prototype_instance_single(
         "--topk-tsv", str(predict_topk_out),
         "--threshold-tsv", str(paths["family_thresholds"]),
         "--filter-mode", str(args.filter_mode),
-    ]
+    ])
     if args.print_topk:
         cmd_predict.append("--print-topk")
 
@@ -1159,8 +1344,10 @@ def cmd_dir(args, script_dir: Path):
     temp_dir.mkdir(parents=True, exist_ok=True)
     log_file = temp_dir / "pipeline.log"
 
-    paths = resolve_auto_paths(script_dir, args)
     pm = args.predict_mode
+    if pm in ("prototype", "instance") and not args.mode_path:
+        raise ValueError("prototype/instance 模式必须提供 -db/--mode-path 下载模型根目录")
+    paths = resolve_auto_paths(script_dir, args)
 
     device_str = str(args.device)
     if device_str == "auto":
@@ -1183,6 +1370,9 @@ def cmd_dir(args, script_dir: Path):
     if pm == "foldseek":
         print(f"  {'Prob Threshold':<22} {args.prob_threshold}")
     if pm in ("prototype", "instance"):
+        print(f"  {'Model Type':<22} {args.model_type}")
+        print(f"  {'Model Root':<22} {paths['model_root']}")
+        print(f"  {'Thresholds':<22} {paths['family_thresholds']}")
         print(f"  {'Filter Mode':<22} {args.filter_mode}")
         print(f"  {'Device':<22} {device_str}")
         print(f"  {'Top-K':<22} {args.topk}")
@@ -1284,23 +1474,23 @@ def cmd_dir(args, script_dir: Path):
 
 
 def cmd_database(args, script_dir: Path):
-    """Handle the 'database' subcommand: download ProstT5 model."""
+    """Handle the 'database' subcommand: download ESM2 and ProtT5 models."""
     download_path = Path(args.download_path).resolve()
     print_download_header(str(download_path))
 
-    download_script = script_dir / "scripts" / "download_prostT5.py"
+    download_script = script_dir / "scripts" / "download_model.py"
     if not download_script.exists():
         raise FileNotFoundError(f"找不到下载脚本: {download_script}")
 
     t0 = time.time()
-    print_progress(1, 1, "Downloading ProstT5 model from HuggingFace", "start")
+    print_progress(1, 1, "Downloading ESM2 and ProtT5 models from HuggingFace", "start")
     run_cmd([
         sys.executable,
         str(download_script),
         "-o", str(download_path),
     ], cwd=script_dir)
     elapsed = time.time() - t0
-    print_progress(1, 1, "Downloading ProstT5 model from HuggingFace", "done", f"{elapsed:.1f}s")
+    print_progress(1, 1, "Downloading ESM2 and ProtT5 models from HuggingFace", "done", f"{elapsed:.1f}s")
 
     print_summary("Download Complete", [
         ("Model directory", str(download_path)),
@@ -1445,6 +1635,8 @@ def main():
     # query 文件固定放 temp
     protein_ids_path = temp_dir / "protein_ids.txt"
     emb_npy_path = temp_dir / "query_embeddings.npy"
+    esm2_emb_dir = temp_dir / "esm2_embeddings"
+    prost_emb_dir = temp_dir / "prost_embeddings"
     domtblout_path = temp_dir / "hmm_results.domtblout"
     hmm_npy_path = temp_dir / "query_hmm_features_L2.npy"
     hmm_txt_path = temp_dir / "query_hmm_features_L2.txt"
@@ -1462,10 +1654,14 @@ def main():
         ("Input Type", input_type_label),
         ("Output Directory", str(work_dir)),
         ("Temp Directory", str(temp_dir)),
-        ("ProstT5 Model", str(paths["prost_model"])),
+        ("Model Root", str(paths["model_root"])),
+        ("ESM2 Model", str(paths["esm2_model"])),
+        ("ProtT5 Model", str(paths["prost_model"])),
         ("HMM Database", str(paths["hmm_db"])),
+        ("Thresholds", str(paths["family_thresholds"])),
         ("Device", device_str),
         ("Prediction Mode", str(args.predict_mode)),
+        ("Model Type", str(args.model_type)),
         ("Filter Mode", str(args.filter_mode)),
         ("Top-K Candidates", str(args.topk)),
         ("CPU Threads", str(args.cpu)),
@@ -1509,23 +1705,25 @@ def main():
     print_progress(step, total_steps, "Reading input FASTA", "done", f"{len(seq_ids)} sequences, {elapsed:.1f}s")
 
     # ═══════════════════════════════════════════════════
-    #  Step 2: Embedding generation (ProstT5)
+    #  Step 2: Embedding generation
     # ═══════════════════════════════════════════════════
     step += 1
     t0 = time.time()
-    print_progress(step, total_steps, "Generating ProstT5 embeddings", "start")
-    run_cmd([
-        sys.executable,
-        str(paths["translate_py"]),
-        "-i", str(protein_fasta_for_pipeline),
-        "-o", str(temp_dir),
-        "-n", str(args.cpu),
-        "--model-path", str(paths["prost_model"]),
-        "--cnn-weights", str(paths["cnn_weights"]),
-        "--device", str(args.device),
-    ], cwd=script_dir, log_file=log_file)
+    embed_label = "ESM2 + ProtT5" if args.model_type == "mix" else paths["single_embedding_kind"].upper()
+    print_progress(step, total_steps, f"Generating {embed_label} embeddings", "start")
+    if args.model_type == "mix":
+        if not args.query_emb_esm2 and not args.esm2_emb_dir:
+            esm2_emb_dir.mkdir(parents=True, exist_ok=True)
+            run_embedding_generation(paths, script_dir, protein_fasta_for_pipeline, esm2_emb_dir,
+                                     paths["esm2_model"], args, log_file)
+        prost_emb_dir.mkdir(parents=True, exist_ok=True)
+        run_embedding_generation(paths, script_dir, protein_fasta_for_pipeline, prost_emb_dir,
+                                 paths["prost_model"], args, log_file)
+    else:
+        run_embedding_generation(paths, script_dir, protein_fasta_for_pipeline, temp_dir,
+                                 paths["single_embedding_model"], args, log_file)
     elapsed = time.time() - t0
-    print_progress(step, total_steps, "Generating ProstT5 embeddings", "done", f"{elapsed:.1f}s")
+    print_progress(step, total_steps, f"Generating {embed_label} embeddings", "done", f"{elapsed:.1f}s")
 
     # ═══════════════════════════════════════════════════
     #  Step 3: Build embedding matrix
@@ -1533,10 +1731,25 @@ def main():
     step += 1
     t0 = time.time()
     print_progress(step, total_steps, "Building embedding matrix", "start")
-    emb_stats = build_embedding_npy(seq_ids=seq_ids, emb_dir=temp_dir, out_npy=emb_npy_path, emb_dim=1024)
+    emb_dir_for_matrix = prost_emb_dir if args.model_type == "mix" else temp_dir
+    emb_dim = int(paths["mix_prost_dim"] if args.model_type == "mix" else paths["single_embedding_dim"])
+    emb_stats = build_embedding_npy(seq_ids=seq_ids, emb_dir=emb_dir_for_matrix, out_npy=emb_npy_path, emb_dim=emb_dim)
+    esm2_emb_path = None
+    if args.model_type == "mix":
+        if args.query_emb_esm2 or args.esm2_emb_dir:
+            esm2_emb_path, esm2_stats = resolve_mix_esm2_embedding(
+                args, seq_ids, temp_dir, expected_dim=int(paths["mix_esm2_dim"])
+            )
+        else:
+            esm2_emb_path = temp_dir / "query_embeddings_esm2.npy"
+            esm2_stats = build_embedding_npy(seq_ids=seq_ids, emb_dir=esm2_emb_dir,
+                                             out_npy=esm2_emb_path, emb_dim=int(paths["mix_esm2_dim"]))
     elapsed = time.time() - t0
+    emb_detail = f"{emb_stats['shape'][0]}×{emb_stats['shape'][1]}"
+    if args.model_type == "mix":
+        emb_detail += f" + ESM2 {esm2_stats['shape'][0]}×{esm2_stats['shape'][1]}"
     print_progress(step, total_steps, "Building embedding matrix", "done",
-                   f"{emb_stats['shape'][0]}×{emb_stats['shape'][1]}, {elapsed:.1f}s")
+                   f"{emb_detail}, {elapsed:.1f}s")
 
     # ═══════════════════════════════════════════════════
     #  Step 4: HMM alignment (hmmscan)
@@ -1595,10 +1808,18 @@ def main():
     predict_topk_out = (work_dir / args.predict_topk_output).resolve()
     cmd_predict = [
         sys.executable,
-        str(paths["predict_py"]),
+        str(paths["predict_script"]),
         "--model-path", str(paths["predict_model"]),
         "--map-path", str(paths["predict_map"]),
-        "--query-emb", str(emb_npy_path),
+    ]
+    if args.model_type == "mix":
+        cmd_predict.extend([
+            "--query-emb-esm2", str(esm2_emb_path),
+            "--query-emb-prost5", str(emb_npy_path),
+        ])
+    else:
+        cmd_predict.extend(["--query-emb", str(emb_npy_path)])
+    cmd_predict.extend([
         "--query-hmm", str(hmm_npy_path),
         "--query-ids", str(protein_ids_path),
         "--cluster-annotation-txt", str(paths["cluster_annotation"]),
@@ -1609,7 +1830,7 @@ def main():
         "--topk-tsv", str(predict_topk_out),
         "--threshold-tsv", str(paths["family_thresholds"]),
         "--filter-mode", str(args.filter_mode),
-    ]
+    ])
     if args.print_topk:
         cmd_predict.append("--print-topk")
 
@@ -1648,6 +1869,8 @@ def main():
         ("HMM raw output", str(domtblout_path)),
         ("Pipeline log", str(log_file)),
     ]
+    if args.model_type == "mix":
+        temp_summary_items.insert(1, ("ESM2 embedding matrix", str(esm2_emb_path)))
     if input_is_dna:
         temp_summary_items.append(("Translated protein (.faa)", str(pyrodigal_faa_path)))
         temp_summary_items.append(("Gene positions (.tsv)", str(pyrodigal_pos_path)))

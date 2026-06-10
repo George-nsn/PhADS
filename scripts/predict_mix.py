@@ -1,27 +1,67 @@
 import os
 import argparse
 import csv
-from typing import Dict, List
+from typing import Dict
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from predict import (
+    load_query_ids,
+    ensure_2d,
+    infer_latent_dim,
+    load_cluster_annotation,
+    load_ads_function,
+    load_thresholds,
+    lookup_ads_function,
+    format_thresh,
+)
 
-class SDHProtoNet(nn.Module):
-    """从 train_sdh_protonet_new.py 内联的推理所需模型定义。"""
-    def __init__(self, seq_dim=1024, evo_dim=195, latent_dim=512):
+
+class EmbeddingCrossAttnFusion(nn.Module):
+    """ESM2 和 ProstT5 嵌入通过交叉注意力互相增强。"""
+    def __init__(self, dim_esm2=1280, dim_prost=1024, dim_out=512, n_heads=4, dropout=0.1):
         super().__init__()
-        self.seq_net = nn.Sequential(nn.Linear(seq_dim, latent_dim), nn.LayerNorm(latent_dim), nn.ReLU())
+        self.proj_esm2 = nn.Linear(dim_esm2, dim_out)
+        self.proj_prost = nn.Linear(dim_prost, dim_out)
+        self.cross_attn_s2p = nn.MultiheadAttention(embed_dim=dim_out, num_heads=n_heads, dropout=dropout, batch_first=True)
+        self.cross_attn_p2s = nn.MultiheadAttention(embed_dim=dim_out, num_heads=n_heads, dropout=dropout, batch_first=True)
+        self.norm_s2p = nn.LayerNorm(dim_out)
+        self.norm_p2s = nn.LayerNorm(dim_out)
+        self.norm_fused = nn.LayerNorm(dim_out)
+        self.align_esm2 = nn.Sequential(nn.Linear(dim_esm2, 256), nn.ReLU(), nn.Linear(256, 128))
+        self.align_prost = nn.Sequential(nn.Linear(dim_prost, 256), nn.ReLU(), nn.Linear(256, 128))
+
+    def forward(self, e_esm2, e_prost):
+        q_esm2 = self.proj_esm2(e_esm2).unsqueeze(1)
+        q_prost = self.proj_prost(e_prost).unsqueeze(1)
+        e_esm2_enhanced, _ = self.cross_attn_s2p(q_esm2, q_prost, q_prost)
+        e_esm2_enhanced = self.norm_s2p(q_esm2 + e_esm2_enhanced)
+        e_prost_enhanced, _ = self.cross_attn_p2s(q_prost, q_esm2, q_esm2)
+        e_prost_enhanced = self.norm_p2s(q_prost + e_prost_enhanced)
+        e_fused = self.norm_fused(e_esm2_enhanced.squeeze(1) + e_prost_enhanced.squeeze(1))
+        align_esm2 = self.align_esm2(e_esm2)
+        align_prost = self.align_prost(e_prost)
+        return e_fused, align_esm2, align_prost
+
+
+class CrossAttnSDHProtoNet(nn.Module):
+    """交叉注意力 SDH-ProtoNet 推理模型。"""
+    def __init__(self, dim_esm2=1280, dim_prost=1024, evo_dim=211, latent_dim=512, cross_n_heads=4, cross_dropout=0.1):
+        super().__init__()
+        self.fusion = EmbeddingCrossAttnFusion(dim_esm2=dim_esm2, dim_prost=dim_prost, dim_out=latent_dim,
+                                                n_heads=cross_n_heads, dropout=cross_dropout)
         self.evo_net = nn.Sequential(nn.Linear(evo_dim, latent_dim), nn.LayerNorm(latent_dim), nn.ReLU())
         self.gate = nn.Sequential(nn.Linear(latent_dim * 2, 1), nn.Sigmoid())
         self.projector = nn.Linear(latent_dim, latent_dim)
 
-    def forward(self, x_seq, x_evo, return_gate=False):
-        f_s, f_e = self.seq_net(x_seq), self.evo_net(x_evo)
-        g = self.gate(torch.cat([f_s, f_e], dim=-1))
-        fused = g * f_s + (1 - g) * f_e
+    def forward(self, e_esm2, e_prost, x_evo, return_gate=False):
+        e_fused, _, _ = self.fusion(e_esm2, e_prost)
+        f_e = self.evo_net(x_evo)
+        g = self.gate(torch.cat([e_fused, f_e], dim=-1))
+        fused = g * e_fused + (1 - g) * f_e
         z = F.normalize(self.projector(fused), p=2, dim=1)
         if return_gate:
             return z, g.squeeze(-1)
@@ -29,12 +69,13 @@ class SDHProtoNet(nn.Module):
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="SDH-ProtoNet 预测脚本（prototype/instance 双模式，含动态阈值过滤与注释增强）")
+    p = argparse.ArgumentParser(description="Cross-Attention SDH-ProtoNet 双模型预测脚本（prototype/instance 双模式）")
 
-    p.add_argument("--model-path", default="sdh_protonet_best.pth", help="模型权重路径")
-    p.add_argument("--map-path", default="family_map.pth", help="地图文件路径（generate_prototypes.py 生成）")
+    p.add_argument("--model-path", default="sdh_protonet_crossattn_best.pth", help="交叉注意力模型权重路径")
+    p.add_argument("--map-path", default="family_map.pth", help="地图文件路径")
 
-    p.add_argument("--query-emb", required=True, help="待预测序列嵌入 .npy [N, seq_dim] 或 [seq_dim]")
+    p.add_argument("--query-emb-esm2", required=True, help="待预测 ESM2 嵌入 .npy [N, 1280] 或 [1280]")
+    p.add_argument("--query-emb-prost5", required=True, help="待预测 ProstT5 嵌入 .npy [N, 1024] 或 [1024]")
     p.add_argument("--query-hmm", required=True, help="待预测 HMM 特征 .npy [N, evo_dim] 或 [evo_dim]")
     p.add_argument("--query-ids", default="", help="待预测样本ID文本（每行一个，可选）")
 
@@ -42,10 +83,11 @@ def parse_args():
     p.add_argument("--batch-size", type=int, default=1024, help="推理批大小")
     p.add_argument("--temperature", type=float, default=None, help="softmax 温度；默认用地图文件中的值")
     p.add_argument("--topk", type=int, default=5, help="输出前k个候选")
+    p.add_argument("--cross-n-heads", type=int, default=None, help="交叉注意力头数；默认使用 4")
+    p.add_argument("--cross-dropout", type=float, default=0.1, help="交叉注意力 dropout；推理时仅用于构造模型")
 
-    # 🌟 优化：默认开启 moderate 平衡过滤模式
     p.add_argument("--threshold-tsv", default="family_thresholds.tsv", help="三级阈值基准表格路径 (.tsv)")
-    p.add_argument("--filter-mode", choices=["strict", "moderate", "loose", "none"], default="moderate", 
+    p.add_argument("--filter-mode", choices=["strict", "moderate", "loose", "none"], default="moderate",
                    help="过滤控制模式：strict(高置信度), moderate(标准平衡), loose(远源挖掘), none(关闭过滤)")
 
     p.add_argument("--cluster-annotation-txt", default="cluster_annotation.txt", help="簇注释TXT（TSV）")
@@ -58,186 +100,11 @@ def parse_args():
     return p.parse_args()
 
 
-def load_query_ids(path: str, n: int) -> List[str]:
-    if not path or (not os.path.exists(path)):
-        return [f"query_{i}" for i in range(n)]
-    with open(path, "r", encoding="utf-8") as f:
-        ids = [ln.strip() for ln in f if ln.strip()]
-    if len(ids) != n:
-        print(f"⚠️ query-ids 行数({len(ids)})与样本数({n})不一致，将使用默认 query_i")
-        return [f"query_{i}" for i in range(n)]
-    return ids
-
-
-def ensure_2d(a: np.ndarray, name: str) -> np.ndarray:
-    if a.ndim == 1:
-        return a[None, :]
-    if a.ndim != 2:
-        raise ValueError(f"{name} 必须是一维或二维数组，当前 shape={a.shape}")
-    return a
-
-
-def infer_latent_dim(state_dict: Dict[str, torch.Tensor], fallback: int = 512) -> int:
-    for k, v in state_dict.items():
-        if k.endswith("projector.weight") and v.ndim == 2:
-            return int(v.shape[0])
-    return fallback
-
-
-def is_missing(v: str) -> bool:
-    s = str(v).strip()
-    return (not s) or s.lower() in {"nan", "none", "na", "-"}
-
-
-def load_cluster_annotation(path: str):
-    if not os.path.exists(path):
-        print(f"⚠️ 未找到 cluster 注释文件: {path}")
-        return {}, []
-
-    out: Dict[int, Dict[str, str]] = {}
-    label_to_rep: Dict[int, str] = {}
-    with open(path, "r", encoding="utf-8", errors="ignore") as f:
-        header = f.readline().rstrip("\n").split("\t")
-        col_idx = {c: i for i, c in enumerate(header)}
-
-        if "label" not in col_idx:
-            print(f"⚠️ cluster_annotation 缺少 label 列，当前列: {header}")
-            return {}, [], {}
-
-        has_rep = "representative" in col_idx
-        func_cols = header[3:] if len(header) > 3 else []
-        label_i = col_idx["label"]
-        rep_i = col_idx.get("representative", -1)
-
-        for line in f:
-            parts = line.rstrip("\n").split("\t")
-            try:
-                lb = int(parts[label_i])
-            except Exception:
-                continue
-
-            # 读取 representative 列
-            if has_rep and rep_i >= 0 and rep_i < len(parts):
-                rep_val = parts[rep_i].strip()
-                if rep_val and not is_missing(rep_val):
-                    label_to_rep[lb] = rep_val
-
-            one = {}
-            for c in func_cols:
-                i = col_idx[c]
-                val = parts[i].strip() if i < len(parts) else ""
-                one[c] = "" if is_missing(val) else val
-            out[lb] = one
-
-    return out, func_cols, label_to_rep
-
-
-def load_ads_function(path: str) -> Dict[str, str]:
-    if not os.path.exists(path):
-        print(f"⚠️ 未找到 ADS 功能文件: {path}")
-        return {}
-
-    name_to_vals: Dict[str, List[str]] = {}
-    with open(path, "r", encoding="utf-8", errors="ignore") as f:
-        header = f.readline().rstrip("\n").split("\t")
-        col_idx = {c: i for i, c in enumerate(header)}
-        if "ADS_name" not in col_idx or "Against/Function" not in col_idx:
-            print(f"⚠️ ADS_function 列不完整，当前列: {header}")
-            return {}
-
-    ni = col_idx["ADS_name"]
-    fi = col_idx["Against/Function"]
-
-    with open(path, "r", encoding="utf-8", errors="ignore") as f:
-        f.readline()
-        for line in f:
-            parts = line.rstrip("\n").split("\t")
-            name = parts[ni].strip() if ni < len(parts) else ""
-            func = parts[fi].strip() if fi < len(parts) else ""
-            if is_missing(name) or is_missing(func):
-                continue
-
-            name_to_vals.setdefault(name, [])
-            if func not in name_to_vals[name]:
-                name_to_vals[name].append(func)
-
-    return {k: "; ".join(vs) for k, vs in name_to_vals.items()}
-
-
-def lookup_ads_function(seq_id: str, ads_map: Dict[str, str]) -> str:
-    if not seq_id:
-        return ""
-    if seq_id in ads_map:
-        return ads_map[seq_id]
-
-    if "." in seq_id:
-        base = seq_id.rsplit(".", 1)[0]
-        if base in ads_map:
-            return ads_map[base]
-
-    return ""
-
-
-def load_thresholds(path: str) -> Dict[str, Dict[str, float]]:
-    """高容错解析 family_thresholds.tsv（自动处理 BOM、空格/Tab 混用）"""
-    if not os.path.exists(path):
-        print(f"⚠️ [警告] 未找到三级阈值矩阵文件: {path}，将关闭在线拦截。")
-        return {}
-
-    thresh_map = {}
-    with open(path, "r", encoding="utf-8-sig") as f:  # utf-8-sig 自动去除 BOM
-        header_line = f.readline().strip()
-        if not header_line:
-            print(f"⚠️ [警告] 阈值文件为空: {path}")
-            return {}
-
-        # 兼容 Tab 或空格分割的表头
-        header = [c.strip() for c in header_line.split("\t") if c.strip()]
-        if len(header) <= 1:
-            header = header_line.split()
-
-        col_idx = {c: i for i, c in enumerate(header)}
-        required = ["family_id", "threshold_strict", "threshold_moderate", "threshold_loose"]
-        for req in required:
-            if req not in col_idx:
-                print(f"❌ [错误] 阈值文件缺少必要列: '{req}'。当前列名: {header}")
-                return {}
-
-        for line_num, line in enumerate(f, start=2):
-            line = line.strip()
-            if not line:
-                continue
-            parts = [p.strip() for p in line.split("\t") if p.strip()]
-            if len(parts) <= 1:
-                parts = line.split()
-            if len(parts) < max(col_idx.values()) + 1:
-                continue
-            fid = parts[col_idx["family_id"]]
-            try:
-                thresh_map[fid] = {
-                    "strict": float(parts[col_idx["threshold_strict"]]),
-                    "moderate": float(parts[col_idx["threshold_moderate"]]),
-                    "loose": float(parts[col_idx["threshold_loose"]]),
-                }
-            except ValueError:
-                continue
-    return thresh_map
-
-
-def format_thresh(val: float) -> str:
-    if val == float("inf") or val == float("-inf") or np.isnan(val):
-        return "NA"
-    return f"{val:.4f}"
-
-
 def main():
     args = parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    check_paths = [args.model_path, args.map_path, args.query_emb, args.query_hmm]
-    if args.filter_mode != "none":
-        check_paths.append(args.threshold_tsv)
-        
+    check_paths = [args.model_path, args.map_path, args.query_emb_esm2, args.query_emb_prost5, args.query_hmm]
     for p in check_paths:
         if not os.path.exists(p):
             raise FileNotFoundError(f"找不到文件: {p}")
@@ -248,21 +115,31 @@ def main():
 
     cluster_annotation_map, cluster_func_cols, annot_reps = load_cluster_annotation(args.cluster_annotation_txt)
     ads_function_map = load_ads_function(args.ads_function_txt)
-    thresholds_map = load_thresholds(args.threshold_tsv) if args.filter_mode != "none" else {}
+    if args.filter_mode != "none" and os.path.exists(args.threshold_tsv):
+        thresholds_map = load_thresholds(args.threshold_tsv)
+    elif args.filter_mode != "none":
+        print(f"⚠️ 未找到阈值文件: {args.threshold_tsv}，双模型预测将不执行距离过滤。")
+        thresholds_map = {}
+    else:
+        thresholds_map = {}
 
-    q_emb = ensure_2d(np.load(args.query_emb), "query_emb")
+    q_esm2 = ensure_2d(np.load(args.query_emb_esm2), "query_emb_esm2")
+    q_prost = ensure_2d(np.load(args.query_emb_prost5), "query_emb_prost5")
     q_hmm = ensure_2d(np.load(args.query_hmm), "query_hmm")
 
-    if q_emb.shape[0] != q_hmm.shape[0]:
-        raise ValueError(f"query_emb 与 query_hmm 样本数不一致: {q_emb.shape[0]} vs {q_hmm.shape[0]}")
+    if q_esm2.shape[0] != q_prost.shape[0] or q_esm2.shape[0] != q_hmm.shape[0]:
+        raise ValueError(f"query 样本数不一致: ESM2={q_esm2.shape[0]}, ProstT5={q_prost.shape[0]}, HMM={q_hmm.shape[0]}")
 
-    n = q_emb.shape[0]
+    n = q_esm2.shape[0]
     query_ids = load_query_ids(args.query_ids, n)
 
-    seq_dim_expected = int(payload.get("seq_dim", q_emb.shape[1]))
+    dim_esm2_expected = int(payload.get("dim_esm2", q_esm2.shape[1]))
+    dim_prost_expected = int(payload.get("dim_prost", payload.get("dim_prost5", q_prost.shape[1])))
     evo_dim_expected = int(payload.get("evo_dim", q_hmm.shape[1]))
-    if q_emb.shape[1] != seq_dim_expected:
-        raise ValueError(f"query_emb 维度不匹配: got {q_emb.shape[1]}, expect {seq_dim_expected}")
+    if q_esm2.shape[1] != dim_esm2_expected:
+        raise ValueError(f"query_emb_esm2 维度不匹配: got {q_esm2.shape[1]}, expect {dim_esm2_expected}")
+    if q_prost.shape[1] != dim_prost_expected:
+        raise ValueError(f"query_emb_prost5 维度不匹配: got {q_prost.shape[1]}, expect {dim_prost_expected}")
     if q_hmm.shape[1] != evo_dim_expected:
         raise ValueError(f"query_hmm 维度不匹配: got {q_hmm.shape[1]}, expect {evo_dim_expected}")
 
@@ -272,7 +149,15 @@ def main():
 
     state = torch.load(args.model_path, map_location="cpu")
     latent_dim = infer_latent_dim(state, fallback=int(payload.get("latent_dim", 512)))
-    model = SDHProtoNet(seq_dim=seq_dim_expected, evo_dim=evo_dim_expected, latent_dim=latent_dim)
+    cross_n_heads = int(args.cross_n_heads or payload.get("cross_n_heads", 4))
+    model = CrossAttnSDHProtoNet(
+        dim_esm2=dim_esm2_expected,
+        dim_prost=dim_prost_expected,
+        evo_dim=evo_dim_expected,
+        latent_dim=latent_dim,
+        cross_n_heads=cross_n_heads,
+        cross_dropout=float(args.cross_dropout),
+    )
     model.load_state_dict(state, strict=True)
     model = model.to(device).eval()
 
@@ -283,14 +168,14 @@ def main():
 
     if args.mode == "prototype":
         if "prototypes" not in payload:
-            raise ValueError("地图文件中没有 prototypes，请重新用 --mode prototype/both 生成")
+            raise ValueError("地图文件中没有 prototypes，请重新用 prototype/both 生成")
         gallery = payload["prototypes"].float().to(device)
         gallery_labels = [int(x) for x in payload["labels"]]
         gallery_ids = [f"prototype_of_{lb}" for lb in gallery_labels]
         target_k = min(topk, len(gallery_labels))
     else:
         if "instance_features" not in payload:
-            raise ValueError("地图文件中没有 instance_features，请重新用 --mode instance/both 生成")
+            raise ValueError("地图文件中没有 instance_features，请重新用 instance/both 生成")
         gallery = payload["instance_features"].float().to(device)
         gallery_labels = [int(x) for x in payload["instance_labels"]]
         gallery_ids = payload["instance_ids"]
@@ -305,10 +190,11 @@ def main():
     with torch.no_grad():
         for st in range(0, n, args.batch_size):
             ed = min(st + args.batch_size, n)
-            x_seq = torch.from_numpy(q_emb[st:ed]).float().to(device)
+            e_esm2 = torch.from_numpy(q_esm2[st:ed]).float().to(device)
+            e_prost = torch.from_numpy(q_prost[st:ed]).float().to(device)
             x_evo = torch.from_numpy(q_hmm[st:ed]).float().to(device)
 
-            qz = model(x_seq, x_evo)
+            qz = model(e_esm2, e_prost, x_evo)
             d2 = torch.cdist(qz, gallery, p=2).pow(2)
 
             probs = F.softmax(-d2 / temp, dim=1)
@@ -349,7 +235,6 @@ def main():
                 nearest_seq_function_summary = lookup_ads_function(nearest_seq_id, ads_function_map)
                 pred_cluster_rep = annot_reps.get(best_label, "NA")
 
-                # 🛑 核心过滤拦截逻辑：距离 > 阈值 → 直接拦截，不输出到最终结果
                 filter_status = "Pass"
                 thresh_limit_val = float("inf")
                 if args.filter_mode != "none" and thresholds_map:
@@ -359,10 +244,8 @@ def main():
                     else:
                         filter_status = "Fail"
 
-                # 保留原始预测簇名（unfiltered_cluster）供调试，pred_cluster 始终为真实预测值
                 unfiltered_cluster = pred_cluster_name
 
-                # 对 Top-k 候选池同样进行洗白或状态标记
                 cand = []
                 for j in range(target_k):
                     gidx = int(top_idx[i, j].item())
@@ -370,7 +253,7 @@ def main():
                     cid = str(gallery_ids[gidx])
                     cfunc = lookup_ads_function(cid, ads_function_map) if args.mode == "instance" else ""
                     c_cluster_name = cluster_names.get(lb, f"cluster_{lb}")
-                    
+
                     c_filter_status = "Pass"
                     c_thresh_limit_val = float("inf")
                     if args.filter_mode != "none" and thresholds_map:
@@ -391,7 +274,7 @@ def main():
                         "confidence": float(top_probs[i, j].item()),
                         "ads_function": cfunc if c_filter_status == "Pass" else "",
                         "filter_status": c_filter_status,
-                        "threshold_limit": c_thresh_limit_val
+                        "threshold_limit": c_thresh_limit_val,
                     })
 
                 results.append({
@@ -411,18 +294,12 @@ def main():
                     "nearest_sequence_label": nearest_seq_label,
                     "nearest_sequence_distance2": nearest_seq_distance2,
                     "nearest_sequence_function_summary": nearest_seq_function_summary,
-                    "closest_member": nearest_seq_id,  # 空间最近成员（原始值，不被回退覆盖）
+                    "closest_member": nearest_seq_id,
                     "cluster_func_values": cluster_func_values,
                     "topk": cand,
-                    # 保存候选池引用以便后续回退查找
-                    "_best_label": best_label,
-                    "_best_d2": best_d2,
-                    "_best_prob": best_prob,
-                    "_best_id": best_id,
                     "_cand_pool": cand,
                 })
 
-    # 4. 🌟 候选回退：top-1 失败时，选择 Pass 候选中距离最小的作为主预测
     for r in results:
         if r["filter_status"] == "Fail" and args.filter_mode != "none":
             best_pass = None
@@ -445,13 +322,11 @@ def main():
                 r["nearest_sequence_distance2"] = best_pass["distance2"]
                 r["nearest_sequence_function_summary"] = lookup_ads_function(best_pass["cluster_rep"], ads_function_map)
 
-    # 5. 多轨格式化数据保存 + 防火墙拦截统计
     cluster_func_out_cols = [f"cluster_func_{c}" for c in cluster_func_cols]
     total_count = len(results)
     passed_count = 0
     intercepted_count = 0
 
-    # ── 轨 1) 主预测输出：仅写入通过防火墙的行 ──
     with open(args.output_tsv, "w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f, delimiter='\t')
         writer.writerow([
@@ -464,7 +339,7 @@ def main():
         for r in results:
             if r["filter_status"] == "Fail" and args.filter_mode != "none":
                 intercepted_count += 1
-                continue  # 🎯 核心改动：距离超标直接丢弃，不写入最终结果
+                continue
 
             passed_count += 1
             cluster_func_vals = [r["cluster_func_values"].get(c, "") for c in cluster_func_cols]
@@ -481,7 +356,6 @@ def main():
                 *cluster_func_vals,
             ])
 
-    # ── 轨 2) Top-k 明细输出：候选也进行独立阈值校验 ──
     with open(args.topk_tsv, "w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f, delimiter='\t')
         writer.writerow([
@@ -497,15 +371,11 @@ def main():
                     c["ads_function"],
                 ])
 
-    # 5. 终端回显美化（通过/拦截分别显示）
-    print(f"\n🔮 ==== 预测结果（mode={args.mode} | filter_mode={args.filter_mode}） ====")
+    print(f"\n🔮 ==== 双模型预测结果（mode={args.mode} | filter_mode={args.filter_mode}） ====")
 
-    # 先显示通过的
-    passed_shown = 0
     for r in results:
         if r["filter_status"] == "Fail" and args.filter_mode != "none":
             continue
-        passed_shown += 1
         status_tag = f" [Pass]" if args.filter_mode != "none" else ""
         print(
             f"{r['query_id']}: {r['pred_cluster']} (rep={r['pred_cluster_rep']}){status_tag} "
@@ -521,19 +391,15 @@ def main():
                 c_status_tag = f" [{c['filter_status']}]" if args.filter_mode != "none" else ""
                 print(f"   - top{c['rank']}: id={c['id']} | {c['cluster']}{c_status_tag} d²={c['distance2']:.6f}, p={c['confidence']:.2%}")
 
-    # 再显示被拦截的
     if args.filter_mode != "none":
-        intercepted_shown = 0
         for r in results:
             if r["filter_status"] == "Fail":
-                intercepted_shown += 1
                 limit_str = format_thresh(r["threshold_limit"])
                 print(
                     f"🛑 [FILTERED] {r['query_id']}: matched {r['unfiltered_cluster']} "
                     f"| d²={r['pred_distance2']:.6f} > threshold={limit_str} | conf={r['confidence']:.2%}"
                 )
 
-    # 📊 防火墙统计报告
     print("\n" + "=" * 55)
     print("📊 防火墙拦截系统统计报告：")
     print(f"   🔹 总预测序列数          : {total_count} 条")

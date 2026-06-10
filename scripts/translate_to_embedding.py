@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-精简版 ProstT5 embedding 脚本（仅保留 embedding + 置信度）
+精简版 embedding 脚本（支持 ESM2 / ProstT5）
 
 保留能力：
 1) 支持单个 FASTA 文件或目录（批量 FASTA）
@@ -28,7 +28,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
-from transformers import T5Tokenizer, T5EncoderModel, set_seed
+from transformers import AutoTokenizer, EsmModel, T5Tokenizer, T5EncoderModel, set_seed
+
+try:
+    import onnxruntime as ort
+except ImportError:
+    ort = None
 
 set_seed(42)
 
@@ -58,15 +63,19 @@ _GLOBAL_MODEL = None
 _GLOBAL_TOKENIZER = None
 _GLOBAL_PREDICTOR = None
 _GLOBAL_DEVICE = None
+_GLOBAL_MODEL_KIND = None
+_GLOBAL_ONNX_SESSION = None
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="ProstT5 embedding 生成脚本（精简版）")
+    p = argparse.ArgumentParser(description="ESM2 / ProstT5 embedding 生成脚本（精简版）")
     p.add_argument("-i", "--input", required=True, help="输入 FASTA 文件或目录")
     p.add_argument("-o", "--output", required=True, help="输出目录")
     p.add_argument("-n", "--cpu", type=int, default=4, help="CPU 进程数（GPU 模式下自动使用 1）")
-    p.add_argument("--model-path", "--model", dest="model_path", required=True, help="ProstT5 模型目录")
-    p.add_argument("--cnn-weights", default=None, help="CNN 权重路径（默认使用 cwd/cnn_chkpnt/model.pt，不存在则自动下载）")
+    p.add_argument("--model-path", "--model", dest="model_path", required=True, help="ESM2 或 ProstT5 模型目录")
+    p.add_argument("--model-kind", choices=["auto", "esm2", "prostt5", "prostt5_onnx"], default="auto",
+                   help="模型类型：auto/esm2/prostt5/prostt5_onnx")
+    p.add_argument("--cnn-weights", default=None, help="ProstT5 CNN 权重路径；ESM2/ONNX 模式下忽略")
     p.add_argument("--device", default="auto", help="auto/cpu/cuda/cuda:0")
     return p.parse_args()
 
@@ -88,6 +97,30 @@ def ensure_cnn_weights(cnn_path: Path):
         print("✅ CNN 权重下载完成")
 
 
+def detect_model_kind(model_dir: str, model_kind: str) -> str:
+    if model_kind != "auto":
+        return model_kind
+    name = Path(model_dir).name.lower()
+    if "esm2" in name or "esm-2" in name:
+        return "esm2"
+    if "onnx" in name:
+        return "prostt5_onnx"
+    return "prostt5"
+
+
+def find_onnx_file(model_dir: str) -> Path:
+    root = Path(model_dir)
+    preferred = ["model.onnx", "encoder_model.onnx", "prot_t5_xl_uniref50.onnx"]
+    for name in preferred:
+        p = root / name
+        if p.exists():
+            return p
+    matches = sorted(root.rglob("*.onnx"))
+    if not matches:
+        raise FileNotFoundError(f"未在 ONNX 模型目录中找到 .onnx 文件: {root}")
+    return matches[0]
+
+
 def read_fasta_file(file_path: Path):
     seqs = {}
     with file_path.open("r", encoding="utf-8", errors="ignore") as f:
@@ -105,34 +138,67 @@ def read_fasta_file(file_path: Path):
     return seqs
 
 
-def init_worker(model_dir, threads_per_proc, device_str, cnn_weights_path):
-    global _GLOBAL_MODEL, _GLOBAL_TOKENIZER, _GLOBAL_PREDICTOR, _GLOBAL_DEVICE
+def init_worker(model_dir, threads_per_proc, device_str, cnn_weights_path, model_kind):
+    global _GLOBAL_MODEL, _GLOBAL_TOKENIZER, _GLOBAL_PREDICTOR, _GLOBAL_DEVICE, _GLOBAL_MODEL_KIND, _GLOBAL_ONNX_SESSION
 
     torch.set_num_threads(threads_per_proc)
     device = torch.device(device_str)
     _GLOBAL_DEVICE = device
+    _GLOBAL_MODEL_KIND = model_kind
 
     if device.type == "cuda":
         dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
     else:
         dtype = torch.float32
 
-    tokenizer = T5Tokenizer.from_pretrained(model_dir, local_files_only=True)
-    model = T5EncoderModel.from_pretrained(model_dir, local_files_only=True, torch_dtype=dtype).to(device).eval()
+    if model_kind == "esm2":
+        tokenizer = AutoTokenizer.from_pretrained(model_dir, local_files_only=True)
+        model = EsmModel.from_pretrained(model_dir, local_files_only=True, torch_dtype=dtype).to(device).eval()
+        _GLOBAL_MODEL, _GLOBAL_TOKENIZER, _GLOBAL_PREDICTOR = model, tokenizer, None
+        return
 
+    tokenizer = T5Tokenizer.from_pretrained(model_dir, local_files_only=True)
+    if model_kind == "prostt5_onnx":
+        if ort is None:
+            raise ImportError("使用 prot-t5 ONNX 模型需要安装 onnxruntime")
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if device.type == "cuda" else ["CPUExecutionProvider"]
+        _GLOBAL_ONNX_SESSION = ort.InferenceSession(str(find_onnx_file(model_dir)), providers=providers)
+        _GLOBAL_MODEL, _GLOBAL_TOKENIZER, _GLOBAL_PREDICTOR = None, tokenizer, None
+        return
+
+    model = T5EncoderModel.from_pretrained(model_dir, local_files_only=True, torch_dtype=dtype).to(device).eval()
     predictor = CNN().to(device).eval()
     checkpoint = torch.load(cnn_weights_path, map_location="cpu")["state_dict"]
     predictor.load_state_dict(checkpoint)
     predictor = predictor.to(dtype=dtype).eval()
-
     _GLOBAL_MODEL, _GLOBAL_TOKENIZER, _GLOBAL_PREDICTOR = model, tokenizer, predictor
 
 
 def embed_core(seq: str):
-    global _GLOBAL_MODEL, _GLOBAL_TOKENIZER, _GLOBAL_PREDICTOR, _GLOBAL_DEVICE
+    global _GLOBAL_MODEL, _GLOBAL_TOKENIZER, _GLOBAL_PREDICTOR, _GLOBAL_DEVICE, _GLOBAL_MODEL_KIND, _GLOBAL_ONNX_SESSION
 
     clean_seq = "".join([aa if aa in STANDARD_AA else "X" for aa in seq.upper()])
+
+    if _GLOBAL_MODEL_KIND == "esm2":
+        encoded = _GLOBAL_TOKENIZER(clean_seq, return_tensors="pt", padding=False, truncation=False, add_special_tokens=True)
+        encoded = {k: v.to(_GLOBAL_DEVICE) for k, v in encoded.items()}
+        with torch.no_grad():
+            outputs = _GLOBAL_MODEL(**encoded, output_hidden_states=True)
+            hidden = outputs.hidden_states[30] if outputs.hidden_states and len(outputs.hidden_states) > 30 else outputs.last_hidden_state
+        return hidden[0, 1:-1, :].detach().cpu(), float("nan")
+
     encoded = _GLOBAL_TOKENIZER("<AA2fold> " + " ".join(clean_seq), return_tensors="pt").to(_GLOBAL_DEVICE)
+
+    if _GLOBAL_MODEL_KIND == "prostt5_onnx":
+        inputs = {
+            "input_ids": encoded.input_ids.detach().cpu().numpy(),
+            "attention_mask": encoded.attention_mask.detach().cpu().numpy(),
+        }
+        input_names = {i.name for i in _GLOBAL_ONNX_SESSION.get_inputs()}
+        inputs = {k: v for k, v in inputs.items() if k in input_names}
+        with torch.no_grad():
+            out = _GLOBAL_ONNX_SESSION.run(None, inputs)[0]
+        return torch.from_numpy(out[:, 1:, :]).squeeze(0).float(), float("nan")
 
     with torch.no_grad():
         emb_full = _GLOBAL_MODEL(input_ids=encoded.input_ids, attention_mask=encoded.attention_mask).last_hidden_state
@@ -192,10 +258,14 @@ def worker_fn(args_tuple):
 
 def main():
     args = parse_args()
+    model_kind = detect_model_kind(args.model_path, args.model_kind)
     cnn_weights_path = Path(args.cnn_weights).resolve() if args.cnn_weights else CNN_LOCAL_PATH.resolve()
-    ensure_cnn_weights(cnn_weights_path)
+    if model_kind == "prostt5":
+        ensure_cnn_weights(cnn_weights_path)
 
     device_str = "cuda" if torch.cuda.is_available() else "cpu" if args.device == "auto" else args.device
+    if args.device != "auto":
+        device_str = args.device
     if device_str.startswith("cuda") and not torch.cuda.is_available():
         raise RuntimeError(f"CUDA 不可用，但指定了 --device={device_str}")
 
@@ -215,17 +285,17 @@ def main():
     if not fasta_files:
         raise FileNotFoundError(f"未找到 FASTA 文件: {input_path}")
 
-    print(f"🚀 初始化: device={device_str}, nproc={nproc_effective}")
+    print(f"🚀 初始化: model_kind={model_kind}, device={device_str}, nproc={nproc_effective}")
     print("🧠 载入模型（全局一次）...")
 
     pool = None
     if use_cuda:
-        init_worker(args.model_path, threads_per_proc, device_str, str(cnn_weights_path))
+        init_worker(args.model_path, threads_per_proc, device_str, str(cnn_weights_path), model_kind)
     else:
         pool = Pool(
             processes=nproc_effective,
             initializer=init_worker,
-            initargs=(args.model_path, threads_per_proc, device_str, str(cnn_weights_path)),
+            initargs=(args.model_path, threads_per_proc, device_str, str(cnn_weights_path), model_kind),
         )
 
     try:
