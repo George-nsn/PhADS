@@ -1,6 +1,6 @@
 # PHADS Inference Pipeline User Guide
 
-This directory provides a ready-to-run PHADS-style inference pipeline. The main entry point is `main.py`.
+This directory provides a ready-to-run PHADS-style inference pipeline. The source entry point is `phads.py`; after installation, the command is `phads`.
 
 The pipeline supports four prediction modes:
 
@@ -42,7 +42,7 @@ Automatic translation of DNA input also requires these Python packages:
 Before running deep prediction modes for the first time, download the ESM2 and ProtT5 ONNX embedding models:
 
 ```powershell
-python main.py database --path D:\models\phads_embeddings
+phads database --path D:\models\phads_embeddings
 ```
 
 After downloading, the directory passed to `--db` should contain:
@@ -57,9 +57,9 @@ prot-t5-xl-uniref50-enc-onnx/
 ### 2.1 Self-Check
 
 ```powershell
-python main.py -v --model-type ESM2 --db D:\models\phads_embeddings
-python main.py -v --model-type ProtT5 --db D:\models\phads_embeddings
-python main.py -v --model-type mix --db D:\models\phads_embeddings
+phads -v --model-type ESM2 --db D:\models\phads_embeddings
+phads -v --model-type ProtT5 --db D:\models\phads_embeddings
+phads -v --model-type mix --db D:\models\phads_embeddings
 ```
 
 ### 2.2 Deep Prediction for One FASTA File
@@ -67,37 +67,37 @@ python main.py -v --model-type mix --db D:\models\phads_embeddings
 Recommended mixed-model command:
 
 ```powershell
-python main.py -i input.faa --db D:\models\phads_embeddings -o result_mix --model-type mix --predict-mode prototype --device cuda --filter-mode moderate --topk 5 --use-multiprototype --judge-mode heuristic
+phads -i input.faa --db D:\models\phads_embeddings -o result_mix --model-type mix --predict-mode prototype --device cuda --filter-mode moderate --topk 5 --use-multiprototype --judge-mode heuristic
 ```
 
 ESM2 only:
 
 ```powershell
-python main.py -i input.faa --db D:\models\phads_embeddings -o result_esm2 --model-type ESM2 --predict-mode prototype --device cuda
+phads -i input.faa --db D:\models\phads_embeddings -o result_esm2 --model-type ESM2 --predict-mode prototype --device cuda
 ```
 
 ProtT5 only:
 
 ```powershell
-python main.py -i input.faa --db D:\models\phads_embeddings -o result_prott5 --model-type ProtT5 --predict-mode prototype --device cuda
+phads -i input.faa --db D:\models\phads_embeddings -o result_prott5 --model-type ProtT5 --predict-mode prototype --device cuda
 ```
 
 ### 2.3 Batch Prediction for a Directory
 
 ```powershell
-python main.py -d fasta_dir --db D:\models\phads_embeddings -o result_batch --model-type mix --predict-mode prototype --device cuda
+phads -d fasta_dir --db D:\models\phads_embeddings -o result_batch --model-type mix --predict-mode prototype --device cuda
 ```
 
 ### 2.4 HMM-Only and Foldseek-Only Modes
 
 ```powershell
-python main.py -i input.faa --predict-mode hmm -o result_hmm
-python main.py -i structures_dir --predict-mode foldseek -o result_foldseek
+phads -i input.faa --predict-mode hmm -o result_hmm
+phads -i structures_dir --predict-mode foldseek -o result_foldseek
 ```
 
 ## 3. Frequently Used Arguments
 
-Common `main.py` arguments:
+Common `phads` arguments:
 
 - `-i`, `--input-fasta`: single input FASTA file, either protein or DNA
 - `-d`, `--dir`: input directory for batch processing
@@ -202,3 +202,36 @@ For a more detailed script-level workflow and mathematical description, see `des
 
 - `APP_VERSION`: `0.6-best-ablation-triple-route`
 - Default model type: `mix`
+
+## 8. Bioconda Packaging
+
+This repository now includes a Bioconda packaging skeleton:
+
+```text
+pyproject.toml
+MANIFEST.in
+bioconda-recipe/meta.yaml
+bioconda-recipe/build.sh
+```
+
+The existing database/ directory is preserved and copied during the conda build to:
+
+```text
+$PREFIX/share/phads/database
+```
+
+phads.py automatically searches these resource roots:
+
+1. The PHADS_ROOT environment variable
+2. The source checkout directory
+3. $PREFIX/share/phads
+4. $PREFIX/Library/share/phads
+
+Before submitting to Bioconda, replace these placeholders in bioconda-recipe/meta.yaml:
+
+- REPLACE_WITH_GITHUB_OWNER
+- REPLACE_WITH_REPOSITORY
+- REPLACE_WITH_RELEASE_TARBALL_SHA256
+- REPLACE_WITH_LICENSE
+
+You also need to choose a real license and add a LICENSE file to the repository.

@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -112,6 +113,24 @@ def resolve_temp_dir(temp_arg: Optional[str], work_dir: Path) -> Path:
         path = Path(temp_arg)
         return (path if path.is_absolute() else Path.cwd() / path).resolve()
     return (work_dir / "temp").resolve()
+
+
+def resolve_app_root() -> Path:
+    """Find the directory containing PHADS database/ and scripts/."""
+    module_dir = Path(__file__).resolve().parent
+    candidates = []
+    env_root = os.environ.get("PHADS_ROOT")
+    if env_root:
+        candidates.append(Path(env_root))
+    candidates.extend([
+        module_dir,
+        Path(sys.prefix) / "share" / "phads",
+        Path(sys.prefix) / "Library" / "share" / "phads",
+    ])
+    for root in candidates:
+        if (root / "database").exists() and (root / "scripts").exists():
+            return root.resolve()
+    return module_dir
 
 
 def resolve_downloaded_model_dirs(mode_path: Optional[str]) -> Dict[str, Optional[Path]]:
@@ -824,7 +843,7 @@ def cmd_dir(args, script_dir: Path):
 
 def main():
     args = parse_args()
-    script_dir = Path(__file__).resolve().parent
+    script_dir = resolve_app_root()
 
     if args.command == "database":
         cmd_database(args, script_dir)
