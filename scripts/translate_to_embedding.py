@@ -1,20 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-精简版 embedding 脚本（支持 ESM2 / ProstT5）
-
-保留能力：
-1) 支持单个 FASTA 文件或目录（批量 FASTA）
-2) 多进程 CPU 推理，或单进程 GPU 推理
-3) 输出每条序列的 embedding: <seq_id>_embedding.pt
-4) 输出 summary.csv（含 avg_conf）
-5) 支持断点续跑（checkpoint.idx）
-
-移除内容：
-- 3Di 序列输出
-- decoder/seq2seq 分支
-- is_3Di / encoder_only 开关
-"""
+"""Generate residue-level ESM2 or ProtT5 embeddings for PHADS inference."""
 
 import argparse
 import csv
@@ -37,7 +23,7 @@ except ImportError:
 
 set_seed(42)
 
-# 置信度相关（基于 CNN 对 residue embedding 的 softmax 最大概率均值）
+# Confidence estimate based on the mean maximum softmax probability of the CNN head.
 SS_MAPPING = {i: c for i, c in enumerate("ACDEFGHIKLMNPQRSTVWY")}
 STANDARD_AA = set("ACDEFGHIKLMNPQRSTVWY")
 CNN_WEIGHTS_URL = "https://github.com/mheinzinger/ProstT5/raw/main/cnn_chkpnt/model.pt"
@@ -65,17 +51,19 @@ _GLOBAL_PREDICTOR = None
 _GLOBAL_DEVICE = None
 _GLOBAL_MODEL_KIND = None
 _GLOBAL_ONNX_SESSION = None
+_GLOBAL_ESM_LAYER = 30
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="ESM2 / ProstT5 embedding 生成脚本（精简版）")
-    p.add_argument("-i", "--input", required=True, help="输入 FASTA 文件或目录")
-    p.add_argument("-o", "--output", required=True, help="输出目录")
-    p.add_argument("-n", "--cpu", type=int, default=4, help="CPU 进程数（GPU 模式下自动使用 1）")
-    p.add_argument("--model-path", "--model", dest="model_path", required=True, help="ESM2 或 ProstT5 模型目录")
+    p = argparse.ArgumentParser(description="Generate ESM2 or ProtT5 residue embeddings")
+    p.add_argument("-i", "--input", required=True, help="Input FASTA file or directory")
+    p.add_argument("-o", "--output", required=True, help="Output directory")
+    p.add_argument("-n", "--cpu", type=int, default=4, help="Number of CPU worker processes; GPU mode uses one process")
+    p.add_argument("--model-path", "--model", dest="model_path", required=True, help="ESM2 or ProtT5 model directory")
     p.add_argument("--model-kind", choices=["auto", "esm2", "prostt5", "prostt5_onnx"], default="auto",
-                   help="模型类型：auto/esm2/prostt5/prostt5_onnx")
-    p.add_argument("--cnn-weights", default=None, help="ProstT5 CNN 权重路径；ESM2/ONNX 模式下忽略")
+                   help="Model type: auto/esm2/prostt5/prostt5_onnx")
+    p.add_argument("--esm-layer", type=int, default=30, help="ESM2 hidden state layer to export when --model-kind esm2")
+    p.add_argument("--cnn-weights", default=None, help="Path to ProstT5 CNN weights; ignored for ESM2/ONNX mode")
     p.add_argument("--device", default="auto", help="auto/cpu/cuda/cuda:0")
     return p.parse_args()
 
@@ -89,12 +77,12 @@ def safe_file_stem(seq_id: str) -> str:
 
 def ensure_cnn_weights(cnn_path: Path):
     if not cnn_path.exists():
-        print("📥 CNN 权重不存在，正在下载...")
+        print("CNN weights are missing; downloading required weights...")
         cnn_path.parent.mkdir(parents=True, exist_ok=True)
         req = request.Request(CNN_WEIGHTS_URL, headers={"User-Agent": "Mozilla/5.0"})
         with request.urlopen(req) as response, open(cnn_path, "wb") as f:
             f.write(response.read())
-        print("✅ CNN 权重下载完成")
+        print("CNN weights downloaded successfully")
 
 
 def detect_model_kind(model_dir: str, model_kind: str) -> str:
@@ -117,7 +105,7 @@ def find_onnx_file(model_dir: str) -> Path:
             return p
     matches = sorted(root.rglob("*.onnx"))
     if not matches:
-        raise FileNotFoundError(f"未在 ONNX 模型目录中找到 .onnx 文件: {root}")
+        raise FileNotFoundError(f"No .onnx file was found in ONNX model directory: {root}")
     return matches[0]
 
 
@@ -138,13 +126,14 @@ def read_fasta_file(file_path: Path):
     return seqs
 
 
-def init_worker(model_dir, threads_per_proc, device_str, cnn_weights_path, model_kind):
-    global _GLOBAL_MODEL, _GLOBAL_TOKENIZER, _GLOBAL_PREDICTOR, _GLOBAL_DEVICE, _GLOBAL_MODEL_KIND, _GLOBAL_ONNX_SESSION
+def init_worker(model_dir, threads_per_proc, device_str, cnn_weights_path, model_kind, esm_layer=30):
+    global _GLOBAL_MODEL, _GLOBAL_TOKENIZER, _GLOBAL_PREDICTOR, _GLOBAL_DEVICE, _GLOBAL_MODEL_KIND, _GLOBAL_ONNX_SESSION, _GLOBAL_ESM_LAYER
 
     torch.set_num_threads(threads_per_proc)
     device = torch.device(device_str)
     _GLOBAL_DEVICE = device
     _GLOBAL_MODEL_KIND = model_kind
+    _GLOBAL_ESM_LAYER = int(esm_layer)
 
     if device.type == "cuda":
         dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
@@ -160,7 +149,7 @@ def init_worker(model_dir, threads_per_proc, device_str, cnn_weights_path, model
     tokenizer = T5Tokenizer.from_pretrained(model_dir, local_files_only=True)
     if model_kind == "prostt5_onnx":
         if ort is None:
-            raise ImportError("使用 prot-t5 ONNX 模型需要安装 onnxruntime")
+            raise ImportError("The prot-t5 ONNX model requires onnxruntime")
         providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if device.type == "cuda" else ["CPUExecutionProvider"]
         _GLOBAL_ONNX_SESSION = ort.InferenceSession(str(find_onnx_file(model_dir)), providers=providers)
         _GLOBAL_MODEL, _GLOBAL_TOKENIZER, _GLOBAL_PREDICTOR = None, tokenizer, None
@@ -184,7 +173,7 @@ def embed_core(seq: str):
         encoded = {k: v.to(_GLOBAL_DEVICE) for k, v in encoded.items()}
         with torch.no_grad():
             outputs = _GLOBAL_MODEL(**encoded, output_hidden_states=True)
-            hidden = outputs.hidden_states[30] if outputs.hidden_states and len(outputs.hidden_states) > 30 else outputs.last_hidden_state
+            hidden = outputs.hidden_states[_GLOBAL_ESM_LAYER] if outputs.hidden_states and len(outputs.hidden_states) > _GLOBAL_ESM_LAYER else outputs.last_hidden_state
         return hidden[0, 1:-1, :].detach().cpu(), float("nan")
 
     encoded = _GLOBAL_TOKENIZER("<AA2fold> " + " ".join(clean_seq), return_tensors="pt").to(_GLOBAL_DEVICE)
@@ -202,9 +191,8 @@ def embed_core(seq: str):
 
     with torch.no_grad():
         emb_full = _GLOBAL_MODEL(input_ids=encoded.input_ids, attention_mask=encoded.attention_mask).last_hidden_state
-        residue_emb = emb_full[:, 1:]  # 去掉起始 token
+        residue_emb = emb_full[:, 1:]
 
-        # 置信度
         pred = _GLOBAL_PREDICTOR(residue_emb)
         probs = F.softmax(pred, dim=1)
         max_p, _ = torch.max(probs, dim=1)
@@ -267,7 +255,7 @@ def main():
     if args.device != "auto":
         device_str = args.device
     if device_str.startswith("cuda") and not torch.cuda.is_available():
-        raise RuntimeError(f"CUDA 不可用，但指定了 --device={device_str}")
+        raise RuntimeError(f"CUDA is not available, but --device={device_str} was requested")
 
     use_cuda = device_str.startswith("cuda")
     nproc_effective = 1 if use_cuda else max(1, int(args.cpu))
@@ -283,19 +271,19 @@ def main():
         fasta_files = [input_path]
 
     if not fasta_files:
-        raise FileNotFoundError(f"未找到 FASTA 文件: {input_path}")
+        raise FileNotFoundError(f"No FASTA files were found: {input_path}")
 
-    print(f"🚀 初始化: model_kind={model_kind}, device={device_str}, nproc={nproc_effective}")
-    print("🧠 载入模型（全局一次）...")
+    print(f"[INIT] model_kind={model_kind}, device={device_str}, nproc={nproc_effective}")
+    print("[LOAD] Loading model once for the worker context...")
 
     pool = None
     if use_cuda:
-        init_worker(args.model_path, threads_per_proc, device_str, str(cnn_weights_path), model_kind)
+        init_worker(args.model_path, threads_per_proc, device_str, str(cnn_weights_path), model_kind, args.esm_layer)
     else:
         pool = Pool(
             processes=nproc_effective,
             initializer=init_worker,
-            initargs=(args.model_path, threads_per_proc, device_str, str(cnn_weights_path), model_kind),
+            initargs=(args.model_path, threads_per_proc, device_str, str(cnn_weights_path), model_kind, args.esm_layer),
         )
 
     try:
@@ -305,7 +293,7 @@ def main():
 
             seqs = read_fasta_file(fasta_file)
             if not seqs:
-                print(f"⚠️ 空文件，跳过: {fasta_file}")
+                print(f"[WARN] Empty FASTA file skipped: {fasta_file}")
                 continue
 
             job_args = [(sid, seq, str(run_out_dir)) for sid, seq in seqs.items()]
@@ -315,7 +303,6 @@ def main():
             completed_ids = set()
             existing_results = {}
 
-            # 断点恢复
             if idx_path.exists() and summary_path.exists():
                 try:
                     with idx_path.open("r", encoding="utf-8") as idx_f:
@@ -332,7 +319,7 @@ def main():
             todo_jobs = [j for j in job_args if j[0] not in completed_ids]
 
             if len(completed_ids) == len(job_args):
-                print(f"⏭️  {fasta_file.name} 已全部完成，跳过")
+                print(f"[SKIP] All sequences have already been processed for {fasta_file.name}")
                 continue
 
             with summary_path.open("w", newline="", encoding="utf-8") as f:
@@ -355,7 +342,7 @@ def main():
                                 writer.writerow(res)
                                 idx_f.write(f"{res['seq_id']}\n")
 
-            print(f"✅ 完成: {run_out_dir}")
+            print(f"[DONE] Embeddings written to: {run_out_dir}")
 
     finally:
         if pool is not None:

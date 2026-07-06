@@ -1,0 +1,213 @@
+Cluster	rep_name	Against/Function
+Cluster_0	apyc1	Pycsar;Pycsa;HYDROLASE;Putative Ribonuclease;metallo-beta-lactamase;RNA BINDING PROTEIN;METAL BINDING PROTEIN;Unknown
+Cluster_1	aca10	CRISPR-Cas - Type I-C, I-E;CRISPR-Cas - Type I-E, I-F;CRISPR-Cas - Type II-C;CRISPR-Cas - Type I-F;CRISPR-Cas - Type I-F, I-E
+Cluster_2	AcrIC11	CRISPR-Cas - Type I-C;HYDROLASE INHIBITOR;RM;CRISPR-Cas Type I-C
+Cluster_3	aca2	CRISPR-Cas - Type I-F, II-C;CRISPR-Cas;unknown function
+Cluster_4	Prs_3	NADP;REGULATORY PROTEIN;TRANSFERASE
+Cluster_5	narp1_namat	NADP;TRANSFERASE;NAD
+Cluster_6	hia5	RM;TRANSFERASE;RM - Type II;DNA adenine methylase;Type II methyltransferase M1.DpnII
+Cluster_7	narp2_nmnat	NADP;NADP/ADPRP
+Cluster_8	tad2	Thoeris;CBASS;CRISPR-Cas - Type II-A
+Cluster_9	AcrID1	CRISPR-Cas - Type I-D;Unknown
+Cluster_10	AcrIII_1	CRISPR-Cas - Type Any utilising cA4 as a second messenger;a highly conserved protein(unknown function);DNA Binding Protein
+Cluster_11	AcrIIC2	CRISPR-Cas - Type II-C
+Cluster_12	ardu	RM;REPLICATION INHIBITOR
+Cluster_13	ugi	DNA repair;RM
+Cluster_14	acb1	CBASS
+Cluster_15	AcrIIA2	CRISPR-Cas - Type II-A
+Cluster_16	dmd	TA;histone deacetylase
+Cluster_17	tad1	Thoeris;CBASS;VIRAL PROTEIN
+Cluster_18	AcrIF3	CRISPR-Cas - Type I-F;CRISPR-Cas
+Cluster_19	AcrIIA13b	CRISPR-Cas - Type II-A
+Cluster_20	AcrVIA3	CRISPR-Cas - Type VI-A
+Cluster_21	AcrIIA8	CRISPR-Cas - Type II-A
+Cluster_22	rad	Retron
+Cluster_23	AcrIA3	CRISPR-Cas - Type I-A
+Cluster_24	had1	Hachiman
+Cluster_25	gp5_9	RecBCD
+Cluster_26	ral	RM - Type I
+Cluster_27	AcrIB4	CRISPR-Cas - Type I-B
+Cluster_28	gad1	Gabjia
+Cluster_29	gnarl2	O-antigen-based barrier
+Cluster_30	AcrIB5	CRISPR-Cas - Type I-B
+Cluster_31	orba	BREX
+Cluster_32	aca12	CRISPR-Cas - Type II-A
+Cluster_33	AcrIIA22	CRISPR-Cas - Type II-A
+Cluster_34	AcrIIA28	CRISPR-Cas - Type II-A
+Cluster_35	mom	RM
+Cluster_36	AcrIE8	CRISPR-Cas - Type I-E
+Cluster_37	dsad1	DSR2
+Cluster_38	AcrIF17	CRISPR-Cas - Type I-F
+Cluster_39	aca8	CRISPR-Cas - Type I-D
+Cluster_40	ipii	RM
+Cluster_41	AcrIIA27	CRISPR-Cas - Type II-A
+Cluster_42	AcrIE4	CRISPR-Cas - Type I-E
+Cluster_43	ipi	RM
+Cluster_44	AcrVIA7	CRISPR-Cas - Type VI-A
+Cluster_45	AcrIC9	CRISPR-Cas - Type I-C
+Cluster_46	adnd_p0021	Dnd
+Cluster_47	AcrIIA15	CRISPR-Cas - Type II-A
+Cluster_48	AcrIF4	CRISPR-Cas - Type I-F
+Cluster_49	AcrIIA19	CRISPR-Cas - Type II-A
+Cluster_50	AcrIIIB1	CRISPR-Cas - Type III-B
+Cluster_51	AcrIIC6	CRISPR-Cas - Type II-C
+Cluster_52	AcrIC1	CRISPR-Cas - Type I-C
+Cluster_53	AcrIF1	CRISPR-Cas - Type I-F
+Cluster_54	dara	RM - Type I
+Cluster_55	AcrIF9	CRISPR-Cas - Type I-F
+Cluster_56	AcrIF21	CRISPR-Cas - Type I-F
+Cluster_57	abc2	RecBCD;CBASS
+Cluster_58	AcrIIA26	CRISPR-Cas - Type II-A
+Cluster_59	AcrIB9	CRISPR-Cas - Type I-B
+Cluster_60	AcrIIA3	CRISPR-Cas - Type II-A
+Cluster_61	acrx	CRISPR
+Cluster_62	AcrVIA6	CRISPR-Cas - Type VI-A
+Cluster_63	AcrIF16	CRISPR-Cas - Type I-F
+Cluster_64	stp	RM
+Cluster_65	AcrVIB1	CRISPR-Cas - Type VI-B
+Cluster_66	AcrIF24	CRISPR-Cas - Type I-F
+Cluster_67	AcrIF8	CRISPR-Cas - Type I-F
+Cluster_68	AcrIC5	CRISPR-Cas - Type I-C
+Cluster_69	AcrIIA11	CRISPR-Cas - Type II-A
+Cluster_70	AcrIE5	CRISPR-Cas - Type I-E
+Cluster_71	nip	NADase
+Cluster_72	AcrIC6	CRISPR-Cas - Type I-C, I-E
+Cluster_73	aca11	CRISPR-Cas - Type II-A
+Cluster_74	vcrx089	RM;CHAPERONE
+Cluster_75	AcrIIC4	CRISPR-Cas - Type II-C
+Cluster_76	AcrVIA2	CRISPR-Cas - Type VI-A
+Cluster_77	psia	SOS stress response
+Cluster_78	abc1	RecBCD
+Cluster_79	AcrIB7	CRISPR-Cas - Type I-B
+Cluster_80	AcrVIA4	CRISPR-Cas - Type VI-A
+Cluster_81	Dap2	T3SS(EXsA)
+Cluster_82	AcrIC3	CRISPR-Cas - Type I-C
+Cluster_83	vcrx091	CRISPR-Cas;DNA repair
+Cluster_84	AcrVA2	CRISPR-Cas - Type V-A
+Cluster_85	AcrIIIB2	CRISPR-Cas - Type III-B
+Cluster_86	gam	RecBCD
+Cluster_87	lar	RM
+Cluster_88	AcrIB8	CRISPR-Cas - Type I-B
+Cluster_89	vcrx093	CRISPR-Cas;DNA repair
+Cluster_90	AcrIC10	CRISPR-Cas - Type I-C
+Cluster_91	AcrIIA18	CRISPR-Cas - Type II-A
+Cluster_92	AcrIF20	CRISPR-Cas - Type I-F
+Cluster_93	samase	RM;BREX
+Cluster_94	orf126	Broad-spectrum
+Cluster_95	AcrIF15	CRISPR-Cas - Type I-F
+Cluster_96	AcrIIC3	CRISPR-Cas - Type II-C
+Cluster_97	AcrIIA4	CRISPR-Cas - Type II-A
+Cluster_98	gnarl1	O-antigen-based barrier
+Cluster_99	AcrIIC7	CRISPR-Cas - Type II-C
+Cluster_100	atd1	TIR/STING
+Cluster_101	ulx	RM
+Cluster_102	AcrIB2	CRISPR-Cas - Type I-B
+Cluster_103	ardc	RM
+Cluster_104	AcrIE4-IF7	CRISPR-Cas - Type I-E/I-F
+Cluster_105	AcrIIA34	CRISPR-Cas - Type II-A
+Cluster_106	AcrIF6	CRISPR-Cas - Type I-F/I-E
+Cluster_107	AcrIF11	CRISPR-Cas - Type I-F
+Cluster_108	tifa	TA
+Cluster_109	AcrIF23	CRISPR-Cas - Type I-F
+Cluster_110	gp4_5	TA - sanaTA
+Cluster_111	AcrIF19	CRISPR-Cas - Type I-F
+Cluster_112	ocr	RM - Type I EcoKI;BREX
+Cluster_113	AcrIE7	CRISPR-Cas - Type I-E
+Cluster_114	AcrIB6	CRISPR-Cas - Type I-B
+Cluster_115	adfa	DarTG
+Cluster_116	AcrIIA31	CRISPR-Cas - Type II-A
+Cluster_117	AcrVA3	CRISPR-Cas - Type V-A, I-C
+Cluster_118	adnd_p0020	Dnd
+Cluster_119	AcrIIA24	CRISPR-Cas - Type II-A
+Cluster_120	AcrIF25	CRISPR-Cas - Type I-F
+Cluster_121	gnarl3	O-antigen-based barrier
+Cluster_122	AcrIF10	CRISPR-Cas - Type I-F
+Cluster_123	psib	SOS stress response
+Cluster_124	AcrIF14	CRISPR-Cas - Type I-F
+Cluster_125	AcrIIA12	CRISPR-Cas - Type II-A
+Cluster_126	racc	Retron-Sen2
+Cluster_127	ntase	CBASS/CRISPR-III
+Cluster_128	AcrIC7	CRISPR-Cas - Type I-C, I-E
+Cluster_129	AcrIF7	CRISPR-Cas - Type I-F
+Cluster_130	AcrIIA17	CRISPR-Cas - Type II-A
+Cluster_131	AcrIB1	CRISPR-Cas - Type I-B
+Cluster_132	AcrVA1	CRISPR-Cas - Type V-A
+Cluster_133	orf148	Broad-spectrum
+Cluster_134	AcrIF12	CRISPR-Cas - Type I-F
+Cluster_135	AcrIIA30	CRISPR-Cas - Type II-A
+Cluster_136	AcrIF18	CRISPR-Cas - Type I-F/I-E
+Cluster_137	AcrIIA32	CRISPR-Cas - Type II-A
+Cluster_138	darb	RM - Type I
+Cluster_139	aca4	CRISPR-Cas - Type I-F;RM
+Cluster_140	AcrIE9	CRISPR-Cas - Type I-E
+Cluster_141	hdf	RM
+Cluster_142	aca13	CRISPR-Cas - Type II-A
+Cluster_143	AcrIIC1	CRISPR-Cas - Type II-C
+Cluster_144	vcrx092	CRISPR-Cas;DNA repair
+Cluster_145	AcrIIA21	CRISPR-Cas - Type II-A
+Cluster_146	aca5	CRISPR-Cas - Type I-F
+Cluster_147	AcrIE3	CRISPR-Cas - Type I-E
+Cluster_148	AcrVIA2_new	CRISPR-Cas - Type VI-A
+Cluster_149	AcrIIA33_Seq	CRISPR-Cas - Type II-A
+Cluster_150	AcrIF5	CRISPR-Cas - Type I-F
+Cluster_151	AcrIA	CRISPR-Cas - Type I-A
+Cluster_152	alt	TA - MazEF
+Cluster_153	AcrIIA5	CRISPR-Cas - Type II-A
+Cluster_154	AcrVIA1_Lwa	CRISPR-Cas - Type VI-A
+Cluster_155	AcrIF22	CRISPR-Cas - Type I-F/I-E
+Cluster_156	vcrx090	RM
+Cluster_157	AcrIIA9	CRISPR-Cas - Type II-A
+Cluster_158	AcrVIA5	CRISPR-Cas - Type VI-A
+Cluster_159	rexb	TA - Phd-Doc;TA - MazEF
+Cluster_160	AcrIF13	CRISPR-Cas - Type I-F
+Cluster_161	AcrIIA14	CRISPR-Cas - Type II-A
+Cluster_162	gad2	Gabija
+Cluster_163	Dap1	HNH
+Cluster_164	AcrIIA33	CRISPR-Cas - Type II-A
+Cluster_165	ardr	RM
+Cluster_166	AcrIIC5	CRISPR-Cas - Type II-C
+Cluster_167	AcrIIC8	CRISPR-Cas - Type II-C
+Cluster_168	AcrIIA23	CRISPR-Cas - Type II-A
+Cluster_169	AcrIC4	CRISPR-Cas - Type I-C
+Cluster_170	ddra	RM
+Cluster_171	AcrIIA10	CRISPR-Cas - Type II-A
+Cluster_172	AcrIE1	CRISPR-Cas - Type I-E
+Cluster_173	AcrIIA29	CRISPR-Cas - Type II-A
+Cluster_174	AcrIC8	CRISPR-Cas - Type I-C, I-E
+Cluster_175	AcrIB3	CRISPR-Cas - Type I-B
+Cluster_176	AcrVA5	CRISPR-Cas - Type V-A
+Cluster_177	AcrIIA1	CRISPR-Cas - Type II-A
+Cluster_178	ddrb	RM
+Cluster_179	AcrIE6	CRISPR-Cas - Type I-E
+Cluster_180	AcrIIA20	CRISPR-Cas - Type II-A
+Cluster_181	Adfm_1	DarTG;GENE REGULATION;SIGNALING PROTEIN;HYDROLASE;VIRAL PROTEIN;DE NOVO PROTEIN;STRUCTURAL GENOMICS, UNKNOWN FUNCTION;UNKNOWN FUNCTION;TRANSFERASE
+Cluster_182	RT	Retron-Sen2;RNA BINDING PROTEIN/DNA/RNA;RNA BINDING PROTEIN
+Cluster_183	AcrIA1	CRISPR-Cas - Type I-A;UNKNOWN FUNCTION
+Cluster_184	ardk_2	RM
+Cluster_185	AcrIIA25	CRISPR-Cas - Type II-A;CRISPR-Cas
+Cluster_186	AcrVA4	CRISPR-Cas - Type V-A
+Cluster_187	AcrIIA6	CRISPR-Cas - Type II-A;CRISPR-Cas - Type II-C
+Cluster_188	Acb4	CBASS
+Cluster_189	RelB	RelE/TA
+Cluster_190	Adfb	DarTG
+Cluster_191	5277	RelE/TA
+Cluster_192	AbiEi	AbiEii/TA
+Cluster_193	5061	RelE/TA
+Cluster_194	5004	RelE/TA
+Cluster_195	AcrIIIB2_2	CRISPR-Cas - Type III-B
+Cluster_196	Adfn_t4	DarTG
+Cluster_197	Gp48	DNA
+Cluster_198	SSB	Klebsiella pneumoniae subsp. pneumoniae MGH 78578(Expression System: Escherichia coli BL21)
+Cluster_199	bet	RECOMBINATION/DNA
+Cluster_200	AcrIIC4_2	CRISPR-Cas - Type -C
+Cluster_201	JSS1_004	DndFGH / CRISPR / QatABCD / SIR2+HerA
+Cluster_202	BxaP	BREX/RM
+Cluster_203	5021	RelE/TA
+Cluster_204	AcrVA3_2	CRISPR-Cas
+Cluster_205	AcrIE2	CRISPR-Cas - Type I-E
+Cluster_206	AcrIF2	CRISPR-Cas - Type I-F;CRISPR-Cas - Type I-C, I-F
+Cluster_207	AcrIIA16	CRISPR-Cas - Type II-A
+Cluster_208	AcrIE10	CRISPR-Cas - Type I-E
+Cluster_209	H_NS	CRISPR；RM
+Cluster_210	gp4	H-NS(CRISPR)
+Cluster_211	gp5_5	H-NS-DNA(CRISPR)

@@ -1,0 +1,61 @@
+{
+  "judge_all": {
+    "n_queries": 4532.0,
+    "accuracy": 1.0,
+    "n_wrong": 0.0
+  },
+  "n_candidate_rows": 22660.0,
+  "n_positive_rows": 4532.0,
+  "feature_columns": [
+    "proto_dist",
+    "proto_rank",
+    "proto_prob",
+    "proto_margin_to_top1",
+    "proto_margin_top2_minus_top1",
+    "hmm_score",
+    "hmm_neglog_evalue",
+    "hmm_coverage",
+    "hmm_bitscore",
+    "hmm_rank",
+    "hmm_margin_to_top1",
+    "hmm_margin_top1_minus_top2",
+    "hmm_has_hit",
+    "is_proto_top1",
+    "is_hmm_top1",
+    "proto_top1_eq_hmm_top1",
+    "family_count_proxy"
+  ],
+  "args": {
+    "dist_path": "D:\\pre_tran\\result\\ablation_gate\\run_20260619_235417\\trainable_protT5_judge\\visual\\retained_members\\query_to_family_dist_sq.tsv",
+    "pred_path": "D:\\pre_tran\\result\\ablation_gate\\run_20260619_235417\\trainable_protT5_judge\\visual\\retained_members\\query_predictions.tsv",
+    "hmm_path": null,
+    "domtblout_path": "D:\\pre_tran\\hmm\\hmm_results.domtblout",
+    "label_path": "D:\\pre_tran\\label\\labels.npy",
+    "ids_path": "D:\\pre_tran\\label\\protein_ids.txt",
+    "out_dir": "D:\\pre_tran\\result\\ablation_gate\\run_20260619_235417\\trainable_protT5_judge\\judge",
+    "topk_proto": 5,
+    "topk_hmm": 5,
+    "hmm_label_offset": 0,
+    "hmm_cluster_offset": 0,
+    "hmm_norm": "clip01",
+    "temperature": 1.0,
+    "val_ratio": 0.2,
+    "seed": 42,
+    "no_plot": true
+  },
+  "prototype_all": {
+    "n_queries": 4532.0,
+    "accuracy": 1.0,
+    "n_wrong": 0.0
+  },
+  "judge_val": {
+    "n_queries": 906.0,
+    "accuracy": 1.0,
+    "n_wrong": 0.0
+  },
+  "prototype_val": {
+    "n_queries": 906.0,
+    "accuracy": 1.0,
+    "n_wrong": 0.0
+  }
+}
