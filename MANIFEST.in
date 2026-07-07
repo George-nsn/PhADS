@@ -1,0 +1,11 @@
+include README.md
+include README_EN.md
+include MODEL_CARD.md
+include description.md
+include environment.yml
+include prost.yml
+recursive-include scripts *.py
+recursive-include database *
+recursive-exclude __pycache__ *
+recursive-exclude scripts/__pycache__ *
+global-exclude *.py[cod]
